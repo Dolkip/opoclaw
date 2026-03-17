@@ -70,7 +70,7 @@ async function buildChannelHistory(msg: Message): Promise<ChatMessage[]> {
 
 
 client.on(Events.MessageCreate, async (msg: Message) => {
-    if (msg.author.bot) return;
+    if (msg.author.bot && !config.allowBots) return;
 
     const isMention = msg.mentions.users.has(client.user!.id);
 
