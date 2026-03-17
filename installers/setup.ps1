@@ -4,26 +4,19 @@ $RepoUrl = "https://github.com/oponic/opoclaw.git"
 $InstallDir = "$HOME\Documents\opoclaw"
 $BinDir = "$HOME\.local\bin"
 
+function Write-Header($msg){ Write-Host "`n═══ $msg ═══`n" -ForegroundColor White -BackgroundColor DarkBlue }
 function Write-Info($msg)  { Write-Host "[opoclaw] $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)    { Write-Host "[✓] $msg" -ForegroundColor Green }
-function Write-Header($msg){ Write-Host "`n═══ $msg ═══`n" -ForegroundColor White -BackgroundColor DarkBlue }
-
-# ── Check for Winget / Scoop ────────────────────────────────────────────────
+function Write-Warn($msg)  { Write-Host "⚠ $msg" -ForegroundColor Yellow }
 
 function Ensure-PackageManager {
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        return "winget"
-    }
-    if (Get-Command scoop -ErrorAction SilentlyContinue) {
-        return "scoop"
-    }
-    Write-Info "No package manager found. Installing Scoop..."
+    if (Get-Command winget -ErrorAction SilentlyContinue) { return "winget" }
+    if (Get-Command scoop -ErrorAction SilentlyContinue)  { return "scoop" }
+    Write-Info "Installing Scoop..."
     Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
     irm get.scoop.sh | iex
     return "scoop"
 }
-
-# ── Install Git ─────────────────────────────────────────────────────────────
 
 function Ensure-Git {
     if (Get-Command git -ErrorAction SilentlyContinue) {
@@ -39,8 +32,6 @@ function Ensure-Git {
     Write-Ok "Git installed"
 }
 
-# ── Install Bun ─────────────────────────────────────────────────────────────
-
 function Ensure-Bun {
     if (Get-Command bun -ErrorAction SilentlyContinue) {
         Write-Ok "Bun already installed ($(bun --version))"
@@ -52,54 +43,39 @@ function Ensure-Bun {
         "winget" { winget install Oven-sh.Bun }
         "scoop"  { scoop install bun }
     }
-    # Refresh PATH for this session
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path","User") + ";" + [System.Environment]::GetEnvironmentVariable("Path","Machine")
     Write-Ok "Bun installed"
 }
 
-# ── Clone Repo ──────────────────────────────────────────────────────────────
-
 function Clone-Repo {
     if (Test-Path $InstallDir) {
-        Write-Ok "opoclaw already exists at $InstallDir — pulling latest"
+        Write-Ok "opoclaw already exists — pulling latest"
         Set-Location $InstallDir
+        git fetch --tags
         git pull --rebase
+        $latestTag = git tag --sort=-v:refname | Select-Object -First 1
+        if ($latestTag) {
+            Write-Info "Checking out latest tag: $latestTag"
+            git checkout $latestTag
+        }
         return
     }
-    Write-Info "Cloning opoclaw to $InstallDir..."
+    Write-Info "Cloning opoclaw (latest tag)..."
     git clone $RepoUrl $InstallDir
+    Set-Location $InstallDir
+    $latestTag = git tag --sort=-v:refname | Select-Object -First 1
+    if ($latestTag) {
+        Write-Info "Checking out latest tag: $latestTag"
+        git checkout $latestTag
+    }
     Write-Ok "Repo cloned"
 }
-
-# ── Install Dependencies ────────────────────────────────────────────────────
 
 function Install-Dependencies {
     Write-Info "Installing dependencies..."
     Set-Location $InstallDir
     bun install
     Write-Ok "Dependencies installed"
-}
-
-# ── Create Bin Symlink ──────────────────────────────────────────────────────
-
-function Create-Symlink {
-    New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
-    $target = Join-Path $InstallDir "installers\onboard.ts"
-    $link = Join-Path $BinDir "opoclaw.cmd"
-    # Create a cmd wrapper
-    "@echo off`nbun run `"$target`" %*" | Out-File -Encoding ascii $link
-    Write-Ok "Created $link"
-
-    # Check PATH
-    $paths = $env:Path -split ";"
-    if ($paths -contains $BinDir) {
-        Write-Ok "$BinDir is in PATH"
-    } else {
-        Write-Host ""
-        Write-Host "⚠ Add this to your PATH:" -ForegroundColor Yellow
-        Write-Host "  $BinDir"
-        Write-Host ""
-    }
 }
 
 # ── Main ────────────────────────────────────────────────────────────────────
@@ -111,8 +87,18 @@ Ensure-Bun
 Write-Header "Setting up opoclaw"
 Clone-Repo
 Install-Dependencies
-Create-Symlink
+
+Write-Header "Installing opoclaw command"
+bun run src/cli.ts install
 
 Write-Header "Launching onboard wizard"
 Set-Location $InstallDir
 bun run installers\onboard.ts
+
+Write-Host ""
+Write-Ok "opoclaw is installed!"
+Write-Host "  Start:    opoclaw gateway start"
+Write-Host "  Usage:    opoclaw usage"
+Write-Host "  Update:   opoclaw update"
+Write-Host "  Help:     opoclaw help"
+Write-Host ""

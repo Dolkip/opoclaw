@@ -1,0 +1,499 @@
+#!/usr/bin/env bun
+/**
+ * opoclaw CLI — usage, gateway management, updates, uninstall
+ */
+
+import { resolve, join } from "path";
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, readdirSync, statSync } from "fs";
+import { execSync, spawn } from "child_process";
+import { homedir } from "os";
+
+// ── Paths ──────────────────────────────────────────────────────────────────
+
+const OP_DIR = resolve(import.meta.dir, "..");
+const CONFIG_FILE = resolve(OP_DIR, "config.json");
+const USAGE_FILE = resolve(OP_DIR, "usage.json");
+const WORKSPACE_DIR = resolve(OP_DIR, "workspace");
+const BIN_DIR = `${homedir()}/.local/bin`;
+const OPCLAW_BIN = `${BIN_DIR}/opoclaw`;
+const LOCK_FILE = resolve(OP_DIR, ".gateway.lock");
+
+// macOS plist
+const PLIST_NAME = "com.oponic.opoclaw.plist";
+const PLIST_PATH_LA = `${homedir()}/Library/LaunchAgents/${PLIST_NAME}`;
+// Linux systemd
+const SYSTEMD_NAME = "opoclaw.service";
+const SYSTEMD_PATH = `/etc/systemd/system/${SYSTEMD_NAME}`;
+
+// ── Colors ─────────────────────────────────────────────────────────────────
+
+const B = "\x1b[1m";
+const C = "\x1b[36m";
+const G = "\x1b[32m";
+const Y = "\x1b[33m";
+const R = "\x1b[31m";
+const X = "\x1b[0m";
+
+const info = (s: string) => console.log(`${C}[opoclaw]${X} ${s}`);
+const ok = (s: string) => console.log(`${G}✓${X} ${s}`);
+const warn = (s: string) => console.log(`${Y}⚠${X} ${s}`);
+const err = (s: string) => console.error(`${R}✗${X} ${s}`);
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function getOS(): "macos" | "linux" | "windows" {
+  const p = process.platform;
+  if (p === "darwin") return "macos";
+  if (p === "win32") return "windows";
+  return "linux";
+}
+
+function loadConfig(): any {
+  if (!existsSync(CONFIG_FILE)) {
+    err("config.json not found. Run `opoclaw setup` first.");
+    process.exit(1);
+  }
+  return JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
+}
+
+function exec(cmd: string, opts?: { cwd?: string }): string {
+  return execSync(cmd, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], ...opts }).trim();
+}
+
+// ── Usage ──────────────────────────────────────────────────────────────────
+
+async function showUsage() {
+  if (!existsSync(USAGE_FILE)) {
+    info("No usage data yet.");
+    return;
+  }
+
+  const data = JSON.parse(readFileSync(USAGE_FILE, "utf-8"));
+  const now = Date.now();
+  const dayAgo = now - 24 * 60 * 60 * 1000;
+
+  const recent = data.sessions.filter((s: any) => new Date(s.timestamp).getTime() > dayAgo);
+
+  let input = 0, output = 0, cacheRead = 0, cacheWrite = 0, cost = 0;
+  for (const s of recent) {
+    input += s.input || 0;
+    output += s.output || 0;
+    cacheRead += s.cacheRead || 0;
+    cacheWrite += s.cacheWrite || 0;
+    cost += s.cost || 0;
+  }
+
+  console.log(`\n${B}═══ opoclaw usage (last 24h) ═══${X}\n`);
+
+  console.log(`  Requests:    ${recent.length}`);
+  console.log(`  Input:       ${(input / 1000).toFixed(1)}k tokens`);
+  console.log(`  Output:      ${(output / 1000).toFixed(1)}k tokens`);
+  console.log(`  Cache read:  ${(cacheRead / 1000).toFixed(1)}k tokens`);
+  console.log(`  Cache write: ${(cacheWrite / 1000).toFixed(1)}k tokens`);
+  console.log(`  Cost:        $${cost.toFixed(4)}`);
+
+  console.log(`\n${B}─── all-time ───${X}\n`);
+  console.log(`  Total cost:  $${data.total.cost.toFixed(4)}`);
+  console.log(`  Total reqs:  ${data.sessions.length}`);
+  console.log();
+}
+
+// ── Update Check ───────────────────────────────────────────────────────────
+
+async function checkForUpdate(silent = false): Promise<string | null> {
+  try {
+    const currentTag = exec("git describe --tags --abbrev=0 2>/dev/null || echo ''", { cwd: OP_DIR });
+    if (!currentTag) return null;
+
+    // Fetch latest tags
+    exec("git fetch --tags 2>/dev/null", { cwd: OP_DIR });
+    const latestTag = exec("git tag --sort=-v:refname | head -1", { cwd: OP_DIR });
+
+    if (latestTag && latestTag !== currentTag) {
+      if (!silent) {
+        console.log(`${Y}📦 Update available: ${currentTag} → ${latestTag}${X}`);
+        console.log(`   Run ${B}opoclaw update${X} to upgrade.\n`);
+      }
+      return latestTag;
+    }
+
+    if (!silent) {
+      ok("Up to date (latest: " + currentTag + ")");
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function notifyUpdateDiscord(newVersion: string) {
+  try {
+    const config = loadConfig();
+    const currentTag = exec("git describe --tags --abbrev=0 2>/dev/null", { cwd: OP_DIR });
+
+    const msg = `📦 **opoclaw update available:** \`${currentTag}\` → \`${newVersion}\`\nRun \`\`\`opoclaw update\`\`\` to upgrade.`;
+
+    await fetch("https://discord.com/api/v10/channels/messages", {
+      method: "POST",
+      headers: {
+        Authorization: `Bot ${config.discordToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ content: msg }),
+    });
+  } catch {}
+}
+
+async function doUpdate() {
+  info("Pulling latest changes...");
+  exec("git fetch --tags", { cwd: OP_DIR });
+  const latestTag = exec("git tag --sort=-v:refname | head -1", { cwd: OP_DIR });
+  exec(`git checkout ${latestTag}`, { cwd: OP_DIR });
+  ok(`Updated to ${latestTag}`);
+
+  info("Installing dependencies...");
+  exec("bun install", { cwd: OP_DIR });
+  ok("Dependencies updated");
+
+  info("Restarting gateway...");
+  await gatewayRestart();
+  ok("Gateway restarted with update");
+}
+
+// ── Gateway Management ─────────────────────────────────────────────────────
+
+function getGatewayPID(): number | null {
+  if (!existsSync(LOCK_FILE)) return null;
+  try {
+    const pid = parseInt(readFileSync(LOCK_FILE, "utf-8").trim());
+    // Check if process is alive
+    process.kill(pid, 0);
+    return pid;
+  } catch {
+    return null;
+  }
+}
+
+function setGatewayPID(pid: number) {
+  writeFileSync(LOCK_FILE, String(pid));
+}
+
+function clearGatewayPID() {
+  try { unlinkSync(LOCK_FILE); } catch {}
+}
+
+async function gatewayStart() {
+  const pid = getGatewayPID();
+  if (pid) {
+    warn(`Gateway already running (PID ${pid})`);
+    return;
+  }
+
+  // Check for updates silently
+  const newVersion = await checkForUpdate(true);
+  if (newVersion) {
+    warn(`Update available: ${newVersion}`);
+    await notifyUpdateDiscord(newVersion);
+  }
+
+  info("Starting gateway...");
+
+  const child = spawn("bun", ["run", "src/index.ts"], {
+    cwd: OP_DIR,
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
+  });
+
+  child.unref();
+  setGatewayPID(child.pid!);
+
+  // Pipe stdout/stderr with prefix
+  child.stdout?.on("data", (d: Buffer) => {
+    process.stdout.write(`${C}[gateway]${X} ${d}`);
+  });
+  child.stderr?.on("data", (d: Buffer) => {
+    process.stderr.write(`${C}[gateway]${X} ${d}`);
+  });
+
+  child.on("exit", (code) => {
+    clearGatewayPID();
+    if (code !== 0) {
+      err(`Gateway exited with code ${code}`);
+    }
+  });
+
+  // Brief delay to check startup
+  setTimeout(() => {
+    if (getGatewayPID()) {
+      ok(`Gateway running (PID ${child.pid})`);
+    }
+  }, 2000);
+}
+
+function gatewayStop() {
+  const pid = getGatewayPID();
+  if (!pid) {
+    warn("Gateway not running");
+    return;
+  }
+
+  info(`Stopping gateway (PID ${pid})...`);
+  try {
+    process.kill(pid, "SIGTERM");
+    clearGatewayPID();
+    ok("Gateway stopped");
+  } catch (e: any) {
+    err(`Failed to stop: ${e.message}`);
+    clearGatewayPID();
+  }
+}
+
+function gatewayRestart() {
+  gatewayStop();
+  setTimeout(() => gatewayStart(), 500);
+}
+
+function gatewayStatus() {
+  const pid = getGatewayPID();
+  if (pid) {
+    ok(`Gateway running (PID ${pid})`);
+  } else {
+    warn("Gateway not running");
+  }
+}
+
+// ── Service Installation ───────────────────────────────────────────────────
+
+function installService() {
+  const os = getOS();
+  info(`Installing ${os} service...`);
+
+  switch (os) {
+    case "macos": {
+      const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.oponic.opoclaw</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${OPCLAW_BIN}</string>
+        <string>gateway</string>
+        <string>start</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${OP_DIR}/logs/gateway.log</string>
+    <key>StandardErrorPath</key>
+    <string>${OP_DIR}/logs/gateway.log</string>
+    <key>WorkingDirectory</key>
+    <string>${OP_DIR}</string>
+</dict>
+</plist>`;
+      mkdirSync(`${OP_DIR}/logs`, { recursive: true });
+      writeFileSync(PLIST_PATH_LA, plist);
+      exec(`launchctl load ${PLIST_PATH_LA}`);
+      ok(`macOS service installed. Manage with:`);
+      console.log(`  launchctl start/com.oponic.opoclaw`);
+      console.log(`  launchctl stop/com.oponic.opoclaw`);
+      break;
+    }
+    case "linux": {
+      const unit = `[Unit]
+Description=opoclaw AI Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${exec("whoami")}
+WorkingDirectory=${OP_DIR}
+ExecStart=${OPCLAW_BIN} gateway start
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:${OP_DIR}/logs/gateway.log
+StandardError=append:${OP_DIR}/logs/gateway.log
+
+[Install]
+WantedBy=multi-user.target`;
+      mkdirSync(`${OP_DIR}/logs`, { recursive: true });
+      writeFileSync(SYSTEMD_PATH, unit);
+      exec("sudo systemctl daemon-reload");
+      exec("sudo systemctl enable opoclaw.service");
+      exec("sudo systemctl start opoclaw.service");
+      ok("Linux systemd service installed and started");
+      console.log(`  systemctl status opoclaw`);
+      console.log(`  systemctl stop opoclaw`);
+      break;
+    }
+    case "windows": {
+      warn("Windows service: create manually with NSSM or sc.exe");
+      console.log(`  nssm install opoclaw "${OPCLAW_BIN}" gateway start`);
+      console.log(`  sc create opoclaw binPath="${OPCLAW_BIN} gateway start"`);
+      break;
+    }
+  }
+}
+
+function uninstallService() {
+  const os = getOS();
+  info(`Removing ${os} service...`);
+
+  switch (os) {
+    case "macos": {
+      try {
+        exec(`launchctl unload ${PLIST_PATH_LA} 2>/dev/null || true`);
+        unlinkSync(PLIST_PATH_LA);
+        ok("macOS service removed");
+      } catch { warn("No service found"); }
+      break;
+    }
+    case "linux": {
+      try {
+        exec("sudo systemctl stop opoclaw.service 2>/dev/null || true");
+        exec("sudo systemctl disable opoclaw.service 2>/dev/null || true");
+        exec("sudo rm -f /etc/systemd/system/opoclaw.service");
+        exec("sudo systemctl daemon-reload");
+        ok("Linux service removed");
+      } catch { warn("No service found"); }
+      break;
+    }
+    case "windows": {
+      try {
+        exec("nssm remove opoclaw confirm 2>nul || true");
+        exec("sc delete opoclaw 2>nul || true");
+        ok("Windows service removed");
+      } catch { warn("No service found"); }
+      break;
+    }
+  }
+}
+
+function uninstall() {
+  info("Uninstalling opoclaw...");
+  gatewayStop();
+  uninstallService();
+  // Remove symlink
+  try { unlinkSync(OPCLAW_BIN); } catch {}
+  ok("opoclaw uninstalled.");
+  console.log(`\n  To remove all data, delete: ${OP_DIR}`);
+  console.log(`  (config.json, workspace, and usage data will be lost)\n`);
+}
+
+// ── Install Command (create symlink + service) ─────────────────────────────
+
+function installCommand() {
+  info("Installing opoclaw command...");
+  mkdirSync(BIN_DIR, { recursive: true });
+
+  // Create wrapper script
+  const wrapper = `#!/bin/bash
+bun run "${resolve(import.meta.dir, "cli.ts")}" "$@"
+`;
+  writeFileSync(OPCLAW_BIN, wrapper);
+  exec(`chmod +x ${OPCLAW_BIN}`);
+  ok(`opoclaw command installed to ${OPCLAW_BIN}`);
+
+  // Check PATH
+  const path = process.env.PATH || "";
+  if (!path.includes(BIN_DIR)) {
+    warn(`${BIN_DIR} is not in your PATH.`);
+    console.log(`  Add to .zshrc / .bashrc:`);
+    console.log(`  export PATH="${BIN_DIR}:$PATH"`);
+  }
+
+  // Install auto-start service
+  const ans = process.argv[3];
+  if (ans === "--service" || ans === "--daemon") {
+    installService();
+  }
+}
+
+// ── CLI Router ─────────────────────────────────────────────────────────────
+
+async function main() {
+  const args = process.argv.slice(2);
+  const cmd = args[0];
+
+  switch (cmd) {
+    case "usage":
+      await showUsage();
+      break;
+
+    case "gateway":
+      const sub = args[1];
+      switch (sub) {
+        case "start":   gatewayStart(); break;
+        case "stop":    gatewayStop(); break;
+        case "restart": gatewayRestart(); break;
+        case "status":  gatewayStatus(); break;
+        default:
+          console.log("Usage: opoclaw gateway {start|stop|restart|status}");
+      }
+      break;
+
+    case "update":
+      await doUpdate();
+      break;
+
+    case "check-update":
+      await checkForUpdate(false);
+      break;
+
+    case "install":
+      installCommand();
+      break;
+
+    case "uninstall":
+      uninstall();
+      break;
+
+    case "service":
+      const svcCmd = args[1];
+      if (svcCmd === "install") installService();
+      else if (svcCmd === "remove") uninstallService();
+      else console.log("Usage: opoclaw service {install|remove}");
+      break;
+
+    case "help":
+    case "--help":
+    case "-h":
+    case undefined:
+      console.log(`
+${B}opoclaw${X} — lightweight AI agent framework
+
+${B}Commands:${X}
+  usage              Show token usage (last 24h) and cost
+  gateway start      Start the bot gateway
+  gateway stop       Stop the gateway
+  gateway restart    Restart the gateway
+  gateway status     Check if gateway is running
+  update             Pull latest release and restart
+  check-update       Check for available updates
+  install            Install opoclaw command + optional service
+  service install    Install auto-start service (systemd/launchd)
+  service remove     Remove auto-start service
+  uninstall          Remove command, service, and clean up
+  help               Show this help
+
+${B}Config:${X}  ${CONFIG_FILE}
+${B}Workspace:${X}  ${WORKSPACE_DIR}
+${B}Usage:${X}  ${USAGE_FILE}
+`);
+      break;
+
+    default:
+      err(`Unknown command: ${cmd}`);
+      console.log("Run `opoclaw help` for usage.");
+      process.exit(1);
+  }
+}
+
+main().catch((e) => {
+  err(e.message || String(e));
+  process.exit(1);
+});
