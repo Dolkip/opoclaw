@@ -75,8 +75,9 @@ client.on(Events.MessageCreate, async (msg: Message) => {
     // Always ignore our own messages
     if (msg.author.id === client.user!.id) return;
 
-    // Ignore other bots unless allowBots is on, but still respond to direct mentions
+    // Ignore other bots unless allowBots is on
     const isBot = msg.author.bot;
+    if (isBot && !config.allowBots) return;
 
     const isMention = msg.mentions.users.has(client.user!.id);
 
@@ -89,9 +90,8 @@ client.on(Events.MessageCreate, async (msg: Message) => {
         }
     }
 
-    // For bots: only respond if mentioned or replied to
-    if (isBot && !config.allowBots && !isMention && !isReplyToBot) return;
-    if (!isBot && !isMention && !isReplyToBot) return;
+    // Only respond to mentions or replies
+    if (!isMention && !isReplyToBot) return;
 
     await addReaction(msg, EYES);
 
