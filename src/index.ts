@@ -72,7 +72,10 @@ async function buildChannelHistory(msg: Message): Promise<ChatMessage[]> {
 
 
 client.on(Events.MessageCreate, async (msg: Message) => {
-    // Ignore bots unless allowBots is on, but still respond to direct mentions
+    // Always ignore our own messages
+    if (msg.author.id === client.user!.id) return;
+
+    // Ignore other bots unless allowBots is on, but still respond to direct mentions
     const isBot = msg.author.bot;
 
     const isMention = msg.mentions.users.has(client.user!.id);
