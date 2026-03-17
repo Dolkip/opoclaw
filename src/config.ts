@@ -77,7 +77,7 @@ export function toTOML(config: Record<string, any>): string {
     return out;
 }
 
-function formatTOMLValue(value: any): string {
+export function formatTOMLValue(value: any): string {
     if (typeof value === "string") return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
     if (typeof value === "boolean") return value ? "true" : "false";
     if (typeof value === "number") return String(value);

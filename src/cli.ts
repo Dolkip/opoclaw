@@ -11,7 +11,7 @@ import { homedir } from "os";
 // ── Paths ──────────────────────────────────────────────────────────────────
 
 const OP_DIR = resolve(import.meta.dir, "..");
-import { loadConfig, getConfigPath } from "./config.ts";
+import { loadConfig, getConfigPath, formatTOMLValue } from "./config.ts";
 import { parseTOML, toTOML } from "./config.ts";
 
 const USAGE_FILE = resolve(OP_DIR, "usage.json");
@@ -409,6 +409,47 @@ bun run "${resolve(import.meta.dir, "cli.ts")}" "$@"
   }
 }
 
+// ── Migrate ─────────────────────────────────────────────────────────────────
+
+function migrate() {
+  const jsonPath = resolve(OP_DIR, "config.json");
+  const tomlPath = resolve(OP_DIR, "config.toml");
+
+  if (!existsSync(jsonPath)) {
+    warn("No config.json found — nothing to migrate.");
+    return;
+  }
+
+  if (existsSync(tomlPath)) {
+    warn("config.toml already exists.");
+    const backupPath = jsonPath + ".bak";
+    writeFileSync(backupPath, readFileSync(jsonPath));
+    ok("Backed up config.json → config.json.bak");
+    return;
+  }
+
+  info("Reading config.json...");
+  const jsonConfig = JSON.parse(readFileSync(jsonPath, "utf-8"));
+
+  info("Converting to TOML...");
+  let toml = "";
+  for (const [key, value] of Object.entries(jsonConfig)) {
+    toml += `${key} = ${formatTOMLValue(value)}\n`;
+  }
+
+  writeFileSync(tomlPath, toml);
+  ok(`Wrote config.toml`);
+
+  // Move old config
+  const backupPath = jsonPath + ".bak";
+  writeFileSync(backupPath, readFileSync(jsonPath));
+  unlinkSync(jsonPath);
+  ok("config.json backed up → config.json.bak and removed");
+
+  console.log(`\n  Your config is now at: ${tomlPath}`);
+  console.log(`  Old config backed up at: ${backupPath}\n`);
+}
+
 // ── CLI Router ─────────────────────────────────────────────────────────────
 
 async function main() {
@@ -455,6 +496,10 @@ async function main() {
       else console.log("Usage: opoclaw service {install|remove}");
       break;
 
+    case "migrate":
+      migrate();
+      break;
+
     case "help":
     case "--help":
     case "-h":
@@ -474,6 +519,7 @@ ${B}Commands:${X}
   service install    Install auto-start service (systemd/launchd)
   service remove     Remove auto-start service
   uninstall          Remove command, service, and clean up
+  migrate            Convert config.json → config.toml
   help               Show this help
 
 ${B}Config:${X}  ${getConfigPath()}
