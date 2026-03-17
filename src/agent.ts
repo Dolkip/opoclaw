@@ -150,6 +150,10 @@ async function streamCompletion(
             if (!delta) continue;
 
             const reasoningDelta = (delta as any).reasoning;
+            // First chunk: log available delta keys for debugging
+            if (!firstToken && (delta.content || reasoningDelta)) {
+                console.log(`[stream] delta keys: ${Object.keys(delta).join(", ")}${reasoningDelta ? " + reasoning" : ""}`);
+            }
             if (reasoningDelta) {
                 if (typeof reasoningDelta === "string") {
                     reasoningBuffer += reasoningDelta;
@@ -292,10 +296,14 @@ export async function runAgent(
         // Generate reasoning summary if enabled and we have reasoning text
         let reasoningSummaryText: string | undefined;
         if (config.reasoningSummary && config.enableReasoning && result.reasoning) {
+            console.log(`[summary] buffer length=${result.reasoning.length}, preview="${result.reasoning.slice(0, 150)}"`);
             reasoningSummaryText = await generateReasoningSummary(
                 result.reasoning,
                 config
             );
+            console.log(`[summary] result="${reasoningSummaryText}"`);
+        } else {
+            console.log(`[summary] skipped — enabled=${config.reasoningSummary}, reasoning=${config.enableReasoning}, buffer=${result.reasoning?.length ?? 0}`);
         }
 
         return { text: responseText, reasoningSummary: reasoningSummaryText };
