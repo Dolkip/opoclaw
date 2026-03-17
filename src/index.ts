@@ -10,8 +10,9 @@ import {
 import { readFileAsync } from "./workspace.ts";
 import { runAgent, type Message as ChatMessage } from "./agent.ts";
 
+import { resolve } from "path";
 const config = await Bun.file(
-    new URL("../config.json", import.meta.url).pathname
+    resolve(import.meta.dir, "../config.json")
 ).json();
 
 const client = new Client({
