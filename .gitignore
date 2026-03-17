@@ -4,3 +4,5 @@ bun.lock
 .DS_Store
 workspace/config.toml
 config.json.bak
+config.toml
+usage.json
