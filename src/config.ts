@@ -1,5 +1,6 @@
 import { resolve } from "path";
 import { existsSync, readFileSync } from "fs";
+import { TOOLS } from "./tools";
 
 const CONFIG_FILE = resolve(import.meta.dir, "../config.toml");
 
@@ -18,7 +19,7 @@ export function parseTOML(text: string): Record<string, any> {
         // Section header: [key]
         const sectionMatch = line.match(/^\[(\w+)\]$/);
         if (sectionMatch) {
-            currentKey = sectionMatch[1];
+            currentKey = sectionMatch[1]!;
             result[currentKey] = result[currentKey] || {};
             currentSection = result[currentKey];
             continue;
@@ -28,7 +29,7 @@ export function parseTOML(text: string): Record<string, any> {
         const kvMatch = line.match(/^(\w+)\s*=\s*(.+)$/);
         if (kvMatch) {
             const [, key, rawValue] = kvMatch;
-            let value: any = rawValue.trim();
+            let value: any = rawValue!.trim();
 
             // String
             if (value.startsWith('"') && value.endsWith('"')) {
@@ -41,7 +42,7 @@ export function parseTOML(text: string): Record<string, any> {
             else if (/^-?\d+$/.test(value)) value = parseInt(value, 10);
             else if (/^-?\d+\.\d+$/.test(value)) value = parseFloat(value);
 
-            currentSection[key] = value;
+            currentSection[key!] = value;
         }
     }
 
@@ -98,6 +99,7 @@ export interface OpoclawConfig {
     reasoning_summary?: boolean;
     reasoning_summary_model?: string;
     notify_channel?: string;
+    basic_tools?: boolean;
 }
 
 export function loadConfig(): OpoclawConfig {
@@ -128,4 +130,14 @@ export function getModelId(config: OpoclawConfig): string {
     if (config.provider === "custom") return config.custom?.model || "unknown";
     if (config.provider === "ollama") return config.ollama?.model || "llama3.2";
     return config.openrouter_model || "openrouter/auto";
+}
+
+export function getTools(config: OpoclawConfig): any[] {
+    const tools = [TOOLS.send_file, TOOLS.shell];
+
+    if (config.basic_tools ?? true) {
+        tools.push(TOOLS.read_file, TOOLS.edit_file, TOOLS.list_files);
+    }
+
+    return tools;
 }

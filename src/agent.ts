@@ -1,5 +1,5 @@
-import { TOOL_DEFINITIONS, handleToolCall } from "./tools.ts";
-import { getApiBaseUrl, getApiKey, getModelId } from "./config.ts";
+import { handleToolCall } from "./tools.ts";
+import { getApiBaseUrl, getApiKey, getModelId, getTools, type OpoclawConfig } from "./config.ts";
 
 interface Message {
     role: "system" | "user" | "assistant" | "tool";
@@ -16,17 +16,6 @@ interface ToolCall {
         name: string;
         arguments: string;
     };
-}
-
-interface Config {
-    openrouter_key?: string;
-    openrouter_model?: string;
-    provider?: "openrouter" | "ollama" | "custom";
-    ollama?: { base_url?: string; model?: string };
-    custom?: { base_url?: string; api_key?: string; model?: string };
-    enable_reasoning?: boolean;
-    reasoning_summary?: boolean;
-    reasoning_summary_model?: string;
 }
 
 interface UsageStats {
@@ -85,13 +74,13 @@ async function recordUsage(usage: any, model: string): Promise<void> {
 
 async function streamCompletion(
     messages: Message[],
-    config: Config,
-    onFirstToken: () => void
-): Promise<{ text: string | null; toolCalls: ToolCall[]; usage: any }> {
+    config: OpoclawConfig,
+    onFirstToken: () => void,
+): Promise<{ text: string | null; toolCalls: ToolCall[]; usage: any, reasoning: string }> {
     const body: any = {
         model: getModelId(config),
         messages,
-        tools: TOOL_DEFINITIONS,
+        tools: getTools(config),
         tool_choice: "auto",
         stream: true,
     };
@@ -204,7 +193,7 @@ async function streamCompletion(
 
 async function generateReasoningSummary(
     reasoningText: string,
-    config: Config
+    config: OpoclawConfig
 ): Promise<string> {
     const model = config.reasoning_summary_model || getModelId(config);
     const response = await fetch(`${getApiBaseUrl(config)}/v1/chat/completions`, {
@@ -239,7 +228,7 @@ async function generateReasoningSummary(
 export async function runAgent(
     history: Message[],
     systemPrompt: string,
-    config: Config,
+    config: OpoclawConfig,
     onFirstToken: () => void
 ): Promise<{ text: string; reasoningSummary?: string }> {
     const messages: Message[] = [
@@ -312,4 +301,4 @@ export async function runAgent(
     return { text: "(agent loop limit reached)" };
 }
 
-export type { Message, Config };
+export type { Message, OpoclawConfig };
