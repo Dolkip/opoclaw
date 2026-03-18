@@ -18,8 +18,8 @@ export function parseTOML(text: string): Record<string, any> {
 
         // Section header: [key]
         const sectionMatch = line.match(/^\[(\w+)\]$/);
-        if (sectionMatch) {
-            currentKey = sectionMatch[1]!;
+        if (sectionMatch && sectionMatch[1]) {
+            currentKey = sectionMatch[1];
             result[currentKey] = result[currentKey] || {};
             currentSection = result[currentKey];
             continue;
@@ -27,9 +27,10 @@ export function parseTOML(text: string): Record<string, any> {
 
         // Key = value
         const kvMatch = line.match(/^(\w+)\s*=\s*(.+)$/);
-        if (kvMatch) {
-            const [, key, rawValue] = kvMatch;
-            let value: any = rawValue!.trim();
+        if (kvMatch && kvMatch[1] && kvMatch[2]) {
+            const key = kvMatch[1];
+            const rawValue = kvMatch[2];
+            let value: any = rawValue.trim();
 
             // String
             if (value.startsWith('"') && value.endsWith('"')) {
@@ -117,7 +118,7 @@ export function getConfigPath(): string {
 export function getApiBaseUrl(config: OpoclawConfig): string {
     if (config.provider === "custom") return config.custom?.base_url || "http://localhost:11434";
     if (config.provider === "ollama") return config.ollama?.base_url || "http://localhost:11434";
-    return "https://openrouter.ai";
+    return "https://openrouter.ai/api";
 }
 
 export function getApiKey(config: OpoclawConfig): string {

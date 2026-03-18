@@ -39,7 +39,7 @@ async function loadUsage(): Promise<UsageStats> {
         if (await file.exists()) {
             return await file.json();
         }
-    } catch {}
+    } catch { }
     return { total: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 }, sessions: [] };
 }
 
@@ -75,8 +75,8 @@ async function recordUsage(usage: any, model: string): Promise<void> {
 async function streamCompletion(
     messages: Message[],
     config: OpoclawConfig,
-    onFirstToken: () => void,
-): Promise<{ text: string | null; toolCalls: ToolCall[]; usage: any, reasoning: string }> {
+    onFirstToken: () => void
+): Promise<{ text: string | null; toolCalls: ToolCall[]; usage: any; reasoning: string }> {
     const body: any = {
         model: getModelId(config),
         messages,
@@ -113,13 +113,15 @@ async function streamCompletion(
     let finishReason: string | null = null;
     let usage: any = null;
     let reasoningBuffer = "";
+    let sseBuffer = "";
 
     while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
+        sseBuffer += decoder.decode(value, { stream: true });
+        const lines = sseBuffer.split("\n");
+        sseBuffer = lines.pop() || "";
 
         for (const line of lines) {
             if (!line.startsWith("data: ")) continue;
@@ -127,7 +129,11 @@ async function streamCompletion(
             if (data === "[DONE]") { finishReason = finishReason ?? "stop"; continue; }
 
             let parsed: any;
-            try { parsed = JSON.parse(data); } catch { continue; }
+            try {
+                parsed = JSON.parse(data);
+            } catch (e) {
+                continue;
+            }
 
             const choice = parsed.choices?.[0];
             if (!choice) continue;
