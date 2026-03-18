@@ -14,6 +14,7 @@ import {
     ComponentType,
 } from "discord.js";
 import { resolve } from "path";
+import { unlink } from "fs/promises";
 import { readFileAsync } from "./workspace.ts";
 import { runAgent, type Message as ChatMessage, type ToolCall } from "./agent.ts";
 import { getFilePath } from "./workspace.ts";
@@ -92,8 +93,7 @@ async function setHibernating(on: boolean): Promise<void> {
         await Bun.write(HIBERNATE_FILE, new Date().toISOString());
     } else {
         try {
-            await Bun.write(HIBERNATE_FILE, "");
-            await Bun.remove(HIBERNATE_FILE);
+            await unlink(HIBERNATE_FILE);
         } catch {
         }
     }
