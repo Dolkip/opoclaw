@@ -142,6 +142,7 @@ export function getTools(config: OpoclawConfig): any[] {
         TOOLS.search,
         TOOLS.edit_config,
         TOOLS.restart_gateway,
+        TOOLS.hibernate_gateway,
         TOOLS.update_opoclaw,
         TOOLS.shell,
     ];

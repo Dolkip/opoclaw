@@ -111,6 +111,19 @@ export const TOOLS: { [id: string]: any } = {
             },
         },
     },
+    hibernate_gateway: {
+        type: "function",
+        function: {
+            name: "hibernate_gateway",
+            description:
+                "Hibernate the opoclaw gateway (stop responses until approved to wake). This is restricted and requires user approval.",
+            parameters: {
+                type: "object",
+                properties: {},
+                required: [],
+            },
+        },
+    },
     update_opoclaw: {
         type: "function",
         function: {
@@ -477,6 +490,11 @@ export async function handleToolCall(
                 (proc as any).unref();
             }
             return "Gateway restart initiated.";
+        }
+        case "hibernate_gateway": {
+            const hibernatePath = path.resolve(import.meta.dir, "..", ".gateway.hibernate");
+            await writeFile(hibernatePath, new Date().toISOString(), "utf-8");
+            return "Gateway hibernation enabled.";
         }
         case "update_opoclaw": {
             const cmd = ["bash", "-lc", "sleep 1; bun run src/cli.ts update"];

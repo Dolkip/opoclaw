@@ -33,10 +33,11 @@ const client = new Client({
 const EYES = "👀";
 const THINKING = "🤔";
 const TOOL = "🔧";
-const APPROVAL_TOOLS = new Set(["edit_config", "restart_gateway", "update_opoclaw"]);
+const APPROVAL_TOOLS = new Set(["edit_config", "restart_gateway", "hibernate_gateway", "update_opoclaw"]);
 const APPROVAL_TIMEOUT_MS = 60_000;
 const UPDATE_CHECK_INTERVAL_MS = 10 * 60 * 1000;
 const OP_DIR = resolve(import.meta.dir, "..");
+const HIBERNATE_FILE = resolve(OP_DIR, ".gateway.hibernate");
 const dec = new TextDecoder();
 let lastUpdateCheck = 0;
 let cachedUpdateTag: string | null = null;
@@ -76,6 +77,26 @@ async function getUpdateTag(): Promise<string | null> {
     }
     cachedUpdateTag = null;
     return null;
+}
+
+async function isHibernating(): Promise<boolean> {
+    try {
+        return await Bun.file(HIBERNATE_FILE).exists();
+    } catch {
+        return false;
+    }
+}
+
+async function setHibernating(on: boolean): Promise<void> {
+    if (on) {
+        await Bun.write(HIBERNATE_FILE, new Date().toISOString());
+    } else {
+        try {
+            await Bun.write(HIBERNATE_FILE, "");
+            await Bun.remove(HIBERNATE_FILE);
+        } catch {
+        }
+    }
 }
 
 async function removeReaction(msg: Message, emoji: string): Promise<void> {
@@ -143,6 +164,62 @@ client.on(Events.MessageCreate, async (msg: Message) => {
 
     // Only respond to mentions or replies
     if (!isMention && !isReplyToBot) return;
+
+    if (await isHibernating()) {
+        const authorizedUserId = config.authorized_user_id?.trim();
+        if (!authorizedUserId) {
+            await (msg.channel as TextChannel).send(
+                "-# Permission denied: `authorized_user_id` is not set in config.toml."
+            );
+            return;
+        }
+
+        const channel = msg.channel as TextChannel;
+        const notice = await channel.send("-# Requesting permission...");
+        const embed = new EmbedBuilder()
+            .setTitle("Wake Gateway?")
+            .setDescription("The gateway is hibernating. Approve to wake it and continue.")
+            .setColor(0x242429);
+        const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder().setCustomId("wake:yes").setLabel("Yes").setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId("wake:no").setLabel("No").setStyle(ButtonStyle.Danger),
+        );
+        const prompt = await channel.send({ embeds: [embed], components: [row] });
+
+        let approved = false;
+        const expiresAt = Date.now() + APPROVAL_TIMEOUT_MS;
+        while (Date.now() < expiresAt) {
+            const remaining = expiresAt - Date.now();
+            try {
+                const interaction = await prompt.awaitMessageComponent({
+                    componentType: ComponentType.Button,
+                    time: remaining,
+                });
+                if (interaction.user.id !== authorizedUserId) {
+                    await interaction.reply({
+                        content: "You are not authorized to approve this action.",
+                        ephemeral: true,
+                    });
+                    continue;
+                }
+                approved = interaction.customId.endsWith(":yes");
+                await interaction.deferUpdate();
+                break;
+            } catch {
+                approved = false;
+                break;
+            }
+        }
+
+        const finalEmbed = EmbedBuilder.from(embed)
+            .setColor(0x242429)
+            .setFooter({ text: approved ? "Approved" : "Denied or timed out" });
+        await prompt.edit({ embeds: [finalEmbed], components: [] });
+        await notice.edit(`-# Permission ${approved ? "granted" : "denied"}.`);
+
+        if (!approved) return;
+        await setHibernating(false);
+    }
 
     await addReaction(msg, EYES);
 

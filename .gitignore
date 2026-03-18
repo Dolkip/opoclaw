@@ -9,3 +9,4 @@ usage.json
 workspace/
 cache/
 .gateway.lock
+.gateway.hibernate

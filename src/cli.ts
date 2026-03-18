@@ -19,6 +19,7 @@ const WORKSPACE_DIR = resolve(OP_DIR, "workspace");
 const BIN_DIR = `${homedir()}/.local/bin`;
 const OPCLAW_BIN = `${BIN_DIR}/opoclaw`;
 const LOCK_FILE = resolve(OP_DIR, ".gateway.lock");
+const HIBERNATE_FILE = resolve(OP_DIR, ".gateway.hibernate");
 
 // macOS plist
 const PLIST_NAME = "com.oponic.opoclaw.plist";
@@ -297,6 +298,15 @@ function gatewayStatus() {
   }
 }
 
+function gatewayHibernate() {
+  try {
+    writeFileSync(HIBERNATE_FILE, new Date().toISOString());
+    ok("Gateway hibernation enabled");
+  } catch (e: any) {
+    err(`Failed to enable hibernation: ${e.message}`);
+  }
+}
+
 // ── Service Installation ───────────────────────────────────────────────────
 
 function installService() {
@@ -549,9 +559,10 @@ async function main() {
         case "start":   await gatewayStart(); break;
         case "stop":    await gatewayStop(); break;
         case "restart": await gatewayRestart(); break;
+        case "hibernate": gatewayHibernate(); break;
         case "status":  gatewayStatus(); break;
         default:
-          console.log("Usage: opoclaw gateway {start|stop|restart|status}");
+          console.log("Usage: opoclaw gateway {start|stop|restart|hibernate|status}");
       }
       break;
 
@@ -659,6 +670,7 @@ ${B}Commands:${X}
   gateway start      Start the bot gateway
   gateway stop       Stop the gateway
   gateway restart    Restart the gateway
+  gateway hibernate  Hibernate the gateway (requires approval to wake)
   gateway status     Check if gateway is running
   update             Pull latest release and restart
   check-update       Check for available updates
