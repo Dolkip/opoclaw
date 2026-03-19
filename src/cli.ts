@@ -104,7 +104,13 @@ async function checkForUpdate(silent = false): Promise<string | null> {
 
     // Fetch latest tags
     exec("git fetch --tags 2>/dev/null", { cwd: OP_DIR });
-    const latestTag = exec("git tag --sort=-v:refname | head -1", { cwd: OP_DIR });
+    const tagsRaw = exec("git tag --sort=-v:refname", { cwd: OP_DIR });
+    const tags = tagsRaw.split("\n").map((t) => t.trim()).filter(Boolean);
+    let channel: "stable" | "unstable" = "stable";
+    try {
+      channel = (loadConfig().update_channel as any) || "stable";
+    } catch {}
+    const latestTag = pickLatestTag(tags, channel);
 
     if (latestTag && latestTag !== currentTag) {
       if (!silent) {
@@ -121,6 +127,29 @@ async function checkForUpdate(silent = false): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+function isStableTag(tag: string): boolean {
+  if (!tag) return false;
+  if (tag.includes("-")) return false;
+  return !/(alpha|beta|rc)/i.test(tag);
+}
+
+function pickLatestTag(tags: string[], channel: "stable" | "unstable"): string | null {
+  for (const tag of tags) {
+    if (channel === "unstable") return tag;
+    if (isStableTag(tag)) return tag;
+  }
+  return null;
+}
+
+function setUpdateChannel(channel: "stable" | "unstable") {
+  const cfgPath = getConfigPath();
+  if (!existsSync(cfgPath)) return;
+  const raw = readFileSync(cfgPath, "utf-8");
+  const parsed = parseTOML(raw);
+  parsed.update_channel = channel;
+  writeFileSync(cfgPath, toTOML(parsed));
 }
 
 async function notifyUpdateDiscord(newVersion: string) {
@@ -141,10 +170,24 @@ async function notifyUpdateDiscord(newVersion: string) {
   } catch {}
 }
 
-async function doUpdate() {
+async function doUpdate(channelOverride?: "unstable") {
+  if (channelOverride === "unstable") {
+    setUpdateChannel("unstable");
+  }
+
   info("Pulling latest changes...");
   exec("git fetch --tags", { cwd: OP_DIR });
-  const latestTag = exec("git tag --sort=-v:refname | head -1", { cwd: OP_DIR });
+  const tagsRaw = exec("git tag --sort=-v:refname", { cwd: OP_DIR });
+  const tags = tagsRaw.split("\n").map((t) => t.trim()).filter(Boolean);
+  let channel: "stable" | "unstable" = "stable";
+  try {
+    channel = (loadConfig().update_channel as any) || "stable";
+  } catch {}
+  const latestTag = pickLatestTag(tags, channel);
+  if (!latestTag) {
+    err("No matching release tag found.");
+    return;
+  }
   exec(`git checkout ${latestTag}`, { cwd: OP_DIR });
   ok(`Updated to ${latestTag}`);
 
@@ -567,7 +610,7 @@ async function main() {
       break;
 
     case "update":
-      await doUpdate();
+      await doUpdate(args[1] === "unstable" ? "unstable" : undefined);
       break;
 
     case "check-update":
@@ -672,7 +715,7 @@ ${B}Commands:${X}
   gateway restart    Restart the gateway
   gateway hibernate  Hibernate the gateway (requires approval to wake)
   gateway status     Check if gateway is running
-  update             Pull latest release and restart
+  update [unstable]  Pull latest release and restart (use unstable channel)
   check-update       Check for available updates
   install            Install opoclaw command + optional service
   service install    Install auto-start service (systemd/launchd)

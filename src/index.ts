@@ -42,6 +42,7 @@ const HIBERNATE_FILE = resolve(OP_DIR, ".gateway.hibernate");
 const dec = new TextDecoder();
 let lastUpdateCheck = 0;
 let cachedUpdateTag: string | null = null;
+let cachedUpdateChannel: "stable" | "unstable" | null = null;
 
 function runGit(cmd: string): string | null {
     try {
@@ -60,10 +61,12 @@ function runGit(cmd: string): string | null {
 
 async function getUpdateTag(): Promise<string | null> {
     const now = Date.now();
-    if (now - lastUpdateCheck < UPDATE_CHECK_INTERVAL_MS) {
+    const channel = (loadConfig().update_channel as any) || "stable";
+    if (now - lastUpdateCheck < UPDATE_CHECK_INTERVAL_MS && cachedUpdateChannel === channel) {
         return cachedUpdateTag;
     }
     lastUpdateCheck = now;
+    cachedUpdateChannel = channel;
 
     const currentTag = runGit("git describe --tags --abbrev=0 2>/dev/null || echo ''");
     if (!currentTag) {
@@ -71,12 +74,28 @@ async function getUpdateTag(): Promise<string | null> {
         return null;
     }
     runGit("git fetch --tags 2>/dev/null || true");
-    const latestTag = runGit("git tag --sort=-v:refname | head -1");
+    const tagsRaw = runGit("git tag --sort=-v:refname") || "";
+    const tags = tagsRaw.split("\n").map((t) => t.trim()).filter(Boolean);
+    const latestTag = pickLatestTag(tags, channel);
     if (latestTag && latestTag !== currentTag) {
         cachedUpdateTag = latestTag;
         return latestTag;
     }
     cachedUpdateTag = null;
+    return null;
+}
+
+function isStableTag(tag: string): boolean {
+    if (!tag) return false;
+    if (tag.includes("-")) return false;
+    return !/(alpha|beta|rc)/i.test(tag);
+}
+
+function pickLatestTag(tags: string[], channel: "stable" | "unstable"): string | null {
+    for (const tag of tags) {
+        if (channel === "unstable") return tag;
+        if (isStableTag(tag)) return tag;
+    }
     return null;
 }
 

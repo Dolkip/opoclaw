@@ -111,6 +111,7 @@ export interface OpoclawConfig {
     ollama_semantic_search?: boolean;
     use_toml_files?: boolean;
     authorized_user_id?: string;
+    update_channel?: "stable" | "unstable";
     exposed_commands?: string[];
 }
 
