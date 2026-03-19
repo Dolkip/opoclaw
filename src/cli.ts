@@ -110,7 +110,7 @@ async function checkForUpdate(silent = false): Promise<string | null> {
     try {
       channel = (loadConfig().update_channel as any) || "stable";
     } catch {}
-    const latestTag = pickLatestTag(tags, channel);
+    const latestTag = pickLatestTag(tags, channel, currentTag);
 
     if (latestTag && latestTag !== currentTag) {
       if (!silent) {
@@ -135,8 +135,10 @@ function isStableTag(tag: string): boolean {
   return !/(alpha|beta|rc)/i.test(tag);
 }
 
-function pickLatestTag(tags: string[], channel: "stable" | "unstable"): string | null {
-  for (const tag of tags) {
+function pickLatestTag(tags: string[], channel: "stable" | "unstable", currentTag: string): string | null {
+  const currentIndex = tags.indexOf(currentTag);
+  const candidates = currentIndex >= 0 ? tags.slice(0, currentIndex) : tags;
+  for (const tag of candidates) {
     if (channel === "unstable") return tag;
     if (isStableTag(tag)) return tag;
   }
@@ -177,13 +179,14 @@ async function doUpdate(channelOverride?: "unstable") {
 
   info("Pulling latest changes...");
   exec("git fetch --tags", { cwd: OP_DIR });
+  const currentTag = exec("git describe --tags --abbrev=0 2>/dev/null || echo ''", { cwd: OP_DIR });
   const tagsRaw = exec("git tag --sort=-v:refname", { cwd: OP_DIR });
   const tags = tagsRaw.split("\n").map((t) => t.trim()).filter(Boolean);
   let channel: "stable" | "unstable" = "stable";
   try {
     channel = (loadConfig().update_channel as any) || "stable";
   } catch {}
-  const latestTag = pickLatestTag(tags, channel);
+  const latestTag = pickLatestTag(tags, channel, currentTag);
   if (!latestTag) {
     err("No matching release tag found.");
     return;

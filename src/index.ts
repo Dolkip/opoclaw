@@ -77,7 +77,7 @@ async function getUpdateTag(): Promise<string | null> {
     runGit("git fetch --tags 2>/dev/null || true");
     const tagsRaw = runGit("git tag --sort=-v:refname") || "";
     const tags = tagsRaw.split("\n").map((t) => t.trim()).filter(Boolean);
-    const latestTag = pickLatestTag(tags, channel);
+    const latestTag = pickLatestTag(tags, channel, currentTag);
     if (latestTag && latestTag !== currentTag) {
         cachedUpdateTag = latestTag;
         return latestTag;
@@ -92,8 +92,10 @@ function isStableTag(tag: string): boolean {
     return !/(alpha|beta|rc)/i.test(tag);
 }
 
-function pickLatestTag(tags: string[], channel: "stable" | "unstable"): string | null {
-    for (const tag of tags) {
+function pickLatestTag(tags: string[], channel: "stable" | "unstable", currentTag: string): string | null {
+    const currentIndex = tags.indexOf(currentTag);
+    const candidates = currentIndex >= 0 ? tags.slice(0, currentIndex) : tags;
+    for (const tag of candidates) {
         if (channel === "unstable") return tag;
         if (isStableTag(tag)) return tag;
     }
