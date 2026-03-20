@@ -156,6 +156,7 @@ export interface OpoclawConfig {
     authorized_user_id?: string;
     update_channel?: "stable" | "unstable";
     exposed_commands?: string[];
+    enable_web_fetch?: boolean;
 }
 
 export function loadConfig(): OpoclawConfig {
@@ -204,6 +205,10 @@ export function getTools(config: OpoclawConfig): any[] {
         TOOLS.list_skills,
         TOOLS.shell,
     ];
+
+    if (config.enable_web_fetch ?? true) {
+        tools.push(TOOLS.web_fetch);
+    }
 
     if (config.basic_tools ?? true) {
         tools.push(TOOLS.read_file, TOOLS.edit_file, TOOLS.list_files);

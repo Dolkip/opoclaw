@@ -189,6 +189,23 @@ export const TOOLS: { [id: string]: any } = {
             },
         },
     },
+    web_fetch: {
+        type: "function",
+        function: {
+            name: "web_fetch",
+            description: "Fetch a web page and return its text content.",
+            parameters: {
+                type: "object",
+                properties: {
+                    url: {
+                        type: "string",
+                        description: "The URL to fetch.",
+                    },
+                },
+                required: ["url"],
+            },
+        },
+    },
     shell: {
         type: "function",
         function: {
@@ -693,6 +710,13 @@ export async function handleToolCall(
         case "list_skills": {
             const skills = await listSkills();
             return skills.length > 0 ? skills.join("\n") : "(no skills)";
+        }
+        case "web_fetch": {
+            if (!args.url) throw new Error("Missing 'url' argument for web_fetch.");
+            const res = await fetch(String(args.url), { headers: { "User-Agent": "opoclaw-bot/1.0" } });
+            if (!res.ok) throw new Error(`web_fetch failed (${res.status})`);
+            const text = await res.text();
+            return text;
         }
         case "shell": {
             if (!shellSetUp) {
