@@ -403,22 +403,83 @@ function stripHtml(input: string): string {
 }
 
 async function duckDuckGoSearch(query: string, count = 5): Promise<string> {
-    const url = `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=us-en`;
-    const res = await fetch(url, { headers: { "User-Agent": "opoclaw-bot/1.0" } });
-    if (!res.ok) {
-        throw new Error(`DuckDuckGo search failed (${res.status})`);
-    }
-    const html = await res.text();
     const results: Array<{ title: string; url: string; snippet: string }> = [];
 
-    const resultRegex = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<(?:a|div|span)[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/(?:a|div|span)>/g;
-    let match: RegExpExecArray | null;
-    while ((match = resultRegex.exec(html)) && results.length < count) {
-        const url = decodeHtmlEntities(match[1] || "");
-        const title = decodeHtmlEntities(stripHtml(match[2] || ""));
-        const snippet = decodeHtmlEntities(stripHtml(match[3] || ""));
-        if (title && url) {
-            results.push({ title, url, snippet });
+    // 1) JSON instant answer API
+    try {
+        const apiUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&no_html=1&skip_disambig=1`;
+        const res = await fetch(apiUrl, { headers: { "User-Agent": "opoclaw-bot/1.0" } });
+        if (res.ok) {
+            const data: any = await res.json();
+            if (data?.AbstractURL && data?.AbstractText) {
+                results.push({
+                    title: data.Heading || "Result",
+                    url: data.AbstractURL,
+                    snippet: data.AbstractText,
+                });
+            }
+            const related = Array.isArray(data?.RelatedTopics) ? data.RelatedTopics : [];
+            for (const item of related) {
+                if (results.length >= count) break;
+                if (item?.Text && item?.FirstURL) {
+                    results.push({ title: item.Text.split(" - ")[0] || item.Text, url: item.FirstURL, snippet: item.Text });
+                } else if (Array.isArray(item?.Topics)) {
+                    for (const sub of item.Topics) {
+                        if (results.length >= count) break;
+                        if (sub?.Text && sub?.FirstURL) {
+                            results.push({ title: sub.Text.split(" - ")[0] || sub.Text, url: sub.FirstURL, snippet: sub.Text });
+                        }
+                    }
+                }
+            }
+        }
+    } catch {
+        // ignore and fall back
+    }
+
+    // 2) HTML results page
+    if (results.length === 0) {
+        try {
+            const url = `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=us-en`;
+            const res = await fetch(url, { headers: { "User-Agent": "opoclaw-bot/1.0" } });
+            if (res.ok) {
+                const html = await res.text();
+                const resultRegex = /<a[^>]*class=\"result__a\"[^>]*href=\"([^\"]+)\"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<(?:a|div|span)[^>]*class=\"result__snippet\"[^>]*>([\s\S]*?)<\/(?:a|div|span)>/g;
+                let match: RegExpExecArray | null;
+                while ((match = resultRegex.exec(html)) && results.length < count) {
+                    const url = decodeHtmlEntities(match[1] || "");
+                    const title = decodeHtmlEntities(stripHtml(match[2] || ""));
+                    const snippet = decodeHtmlEntities(stripHtml(match[3] || ""));
+                    if (title && url) {
+                        results.push({ title, url, snippet });
+                    }
+                }
+            }
+        } catch {
+            // ignore and fall back
+        }
+    }
+
+    // 3) Lite HTML fallback
+    if (results.length === 0) {
+        try {
+            const url = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`;
+            const res = await fetch(url, { headers: { "User-Agent": "opoclaw-bot/1.0" } });
+            if (res.ok) {
+                const html = await res.text();
+                const rowRegex = /<a[^>]*class=\"result-link\"[^>]*href=\"([^\"]+)\"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<td[^>]*class=\"result-snippet\"[^>]*>([\s\S]*?)<\/td>/g;
+                let match: RegExpExecArray | null;
+                while ((match = rowRegex.exec(html)) && results.length < count) {
+                    const url = decodeHtmlEntities(match[1] || "");
+                    const title = decodeHtmlEntities(stripHtml(match[2] || ""));
+                    const snippet = decodeHtmlEntities(stripHtml(match[3] || ""));
+                    if (title && url) {
+                        results.push({ title, url, snippet });
+                    }
+                }
+            }
+        } catch {
+            // ignore
         }
     }
 
@@ -427,7 +488,70 @@ async function duckDuckGoSearch(query: string, count = 5): Promise<string> {
     }
 
     return results
+        .slice(0, count)
         .map((r, i) => `${i + 1}. ${r.title}\n${r.url}\n${r.snippet}`)
+        .join("\n\n");
+}
+
+async function fetchWithTimeout(url: string, timeoutMs = 5000): Promise<Response> {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, {
+            headers: { "User-Agent": "opoclaw-bot/1.0" },
+            signal: controller.signal,
+        });
+    } finally {
+        clearTimeout(id);
+    }
+}
+
+async function searxSearch(query: string, count = 5): Promise<string> {
+    const instances = [
+        "https://searx.be",
+        "https://searx.tiekoetter.com",
+        "https://search.projectsegfau.lt",
+    ];
+
+    for (const base of instances) {
+        try {
+            const url = `${base}/search?q=${encodeURIComponent(query)}&format=json&language=en`;
+            const res = await fetchWithTimeout(url, 6000);
+            if (!res.ok) continue;
+            const data: any = await res.json();
+            const results = Array.isArray(data?.results) ? data.results : [];
+            const mapped = results
+                .filter((r: any) => r?.url && r?.title)
+                .slice(0, count)
+                .map((r: any, i: number) => `${i + 1}. ${r.title}\n${r.url}\n${r.content || ""}`.trim());
+            if (mapped.length > 0) {
+                return mapped.join("\n\n");
+            }
+        } catch {
+            continue;
+        }
+    }
+    return "(no results)";
+}
+
+async function pythonDuckDuckGoSearch(query: string, count = 5): Promise<string> {
+    const scriptPath = path.resolve(import.meta.dir, "duckduckgo.py");
+    const proc = Bun.spawn({
+        cmd: ["python3", scriptPath, query, String(count)],
+        stdout: "pipe",
+        stderr: "pipe",
+    });
+    const stdout = await new Response(proc.stdout).text();
+    const stderr = await new Response(proc.stderr).text();
+    const code = await proc.exited;
+    if (code !== 0) {
+        throw new Error(stderr || `duckduckgo.py exited with ${code}`);
+    }
+    const data = JSON.parse(stdout || "[]");
+    if (!Array.isArray(data) || data.length === 0) return "(no results)";
+    return data
+        .slice(0, count)
+        .map((r: any, i: number) => `${i + 1}. ${r.title}\n${r.url}\n${r.snippet || ""}`.trim())
         .join("\n\n");
 }
 
@@ -549,7 +673,15 @@ export async function handleToolCall(
             if (!args.query) throw new Error("Missing 'query' argument for search.");
             const countRaw = Number(args.count ?? 5);
             const count = Number.isFinite(countRaw) ? Math.min(Math.max(1, countRaw), 10) : 5;
-            return await duckDuckGoSearch(String(args.query), count);
+            const q = String(args.query);
+            try {
+                const ddg = await pythonDuckDuckGoSearch(q, count);
+                if (ddg !== "(no results)") return ddg;
+            } catch {
+            }
+            const searx = await searxSearch(q, count);
+            if (searx !== "(no results)") return searx;
+            return await duckDuckGoSearch(q, count);
         }
         case "use_skill": {
             if (!args.name) throw new Error("Missing 'name' argument for use_skill.");
