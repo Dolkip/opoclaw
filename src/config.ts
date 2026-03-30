@@ -208,6 +208,8 @@ export function getTools(config: OpoclawConfig): any[] {
         TOOLS.list_skills,
         TOOLS.deep_research,
         TOOLS.react_message,
+        TOOLS.request_permission,
+        TOOLS.question,
         TOOLS.shell,
     ];
 

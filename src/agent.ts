@@ -606,7 +606,8 @@ export async function runAgent(
     onToolCallError: (uniqueId: string, error: Error) => void,
     requestToolApproval?: (call: ToolCall, uniqueId: string) => Promise<{ approved: boolean; message?: string }>,
     onToolBatch?: (calls: ToolCall[], results: ToolResult[]) => Promise<void>,
-    onDeepResearchSummary?: (summary: string) => Promise<void>
+    onDeepResearchSummary?: (summary: string) => Promise<void>,
+    executeTool?: (call: ToolCall, args: Record<string, any>) => Promise<string | undefined>
 ): Promise<{ text: string; reasoningSummary?: string; ranTools?: boolean }> {
     const messages: Message[] = [
         { role: "system", content: systemPrompt },
@@ -651,6 +652,10 @@ export async function runAgent(
                         onToolCall(tc, uniqueId);
                     }
                     const runTool = async () => {
+                        if (executeTool) {
+                            const handled = await executeTool(tc, args);
+                            if (handled !== undefined) return handled;
+                        }
                         if (tc.function.name === "deep_research") {
                             return await runDeepResearch(String(args.query || ""), config, onDeepResearchSummary);
                         }

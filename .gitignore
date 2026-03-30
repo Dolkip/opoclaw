@@ -10,3 +10,4 @@ workspace/
 cache/
 .gateway.lock
 .gateway.hibernate
+logs/

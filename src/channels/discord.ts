@@ -12,6 +12,7 @@ import {
     ButtonStyle,
     EmbedBuilder,
     ComponentType,
+    StringSelectMenuBuilder,
 } from "discord.js";
 import { resolve } from "path";
 import { unlink, readFile as readFileFs } from "fs/promises";
@@ -200,11 +201,17 @@ async function buildChannelHistory(msg: Message): Promise<ChatMessage[]> {
         const idPrefix = `[id:${m.id}] `;
 
         if (isBot) {
-            history.push({ role: "assistant", content: `${idPrefix}${text}${reactionSuffix}` });
+            const cleanedText = text
+                .split("\n")
+                .filter((line) => !line.trim().startsWith("-#"))
+                .join("\n")
+                .trim();
+            if (!cleanedText) continue;
+            history.push({ role: "assistant", content: `${idPrefix}${cleanedText}${reactionSuffix}` });
         } else {
             history.push({
                 role: "user",
-                content: `${idPrefix}[${m.author.displayName}]: ${text || "(attachment)"}${reactionSuffix}`,
+                content: `${idPrefix}[${m.author.displayName} (${m.author.username})]: ${text || "(attachment)"}${reactionSuffix}`,
             });
         }
     }
@@ -336,7 +343,7 @@ export async function startDiscord(): Promise<void> {
         const systemPrompt = systemPromptParts.join("\n") || "You are a helpful assistant.";
 
         const userText = msg.content.replace(/<@!?\d+>/g, "").trim();
-        const idPrefix = `[id:${msg.id}] `;
+    const idPrefix = `[id:${msg.id}] `;
         const visionEnabled = getVisionEnabled(config);
         const imageAttachments = visionEnabled
             ? Array.from(msg.attachments.values()).filter((a) => (a.contentType || "").startsWith("image/"))
@@ -349,17 +356,17 @@ export async function startDiscord(): Promise<void> {
 
         if (visionEnabled && imageAttachments.length > 0) {
             const parts: any[] = [];
-            const text = `${idPrefix}[${msg.author.displayName}]: ${userText || "(image)"}${currentReactionSuffix}`;
+        const text = `${idPrefix}[${msg.author.displayName} (${msg.author.username})]: ${userText || "(image)"}${currentReactionSuffix}`;
             parts.push({ type: "text", text });
             for (const img of imageAttachments) {
                 parts.push({ type: "image_url", image_url: { url: img.url } });
             }
             history.push({ role: "user", content: parts });
         } else {
-            history.push({
-                role: "user",
-                content: `${idPrefix}[${msg.author.displayName}]: ${userText || "(empty message)"}${currentReactionSuffix}`,
-            });
+        history.push({
+            role: "user",
+            content: `${idPrefix}[${msg.author.displayName} (${msg.author.username})]: ${userText || "(empty message)"}${currentReactionSuffix}`,
+        });
         }
 
         let swappedToThinking = false;
@@ -376,6 +383,9 @@ export async function startDiscord(): Promise<void> {
         const onToolCall = async (call: ToolCall, uniqueId: string) => {
             if (call.function.name === "deep_research") {
                 await (msg.channel as TextChannel).send(`-# Using Deep Research...`);
+                return;
+            }
+            if (call.function.name === "request_permission" || call.function.name === "question") {
                 return;
             }
             if (APPROVAL_TOOLS.has(call.function.name)) {
@@ -531,6 +541,133 @@ export async function startDiscord(): Promise<void> {
             return { approved: true };
         };
 
+        const executeTool = async (call: ToolCall, args: Record<string, any>): Promise<string | undefined> => {
+            if (call.function.name === "request_permission") {
+                const authorizedUserId = config.authorized_user_id?.trim();
+                if (!authorizedUserId) {
+                    await (msg.channel as TextChannel).send(
+                        "-# Permission denied: `authorized_user_id` is not set in config.toml."
+                    );
+                    return "Not authorized to make this decision.";
+                }
+
+                const message = typeof args.message === "string" ? args.message : "";
+                const title = typeof args.title === "string" && args.title.trim()
+                    ? args.title.trim()
+                    : "Permission Request";
+
+                const channel = msg.channel as TextChannel;
+                const notice = await channel.send("-# Requesting permission...");
+                const embed = new EmbedBuilder()
+                    .setTitle(title)
+                    .setDescription(message || "(no message)")
+                    .setColor(0x242429);
+
+                const promptId = Math.random().toString(36).slice(2);
+                const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+                    new ButtonBuilder().setCustomId(`request:${promptId}:yes`).setLabel("Yes").setStyle(ButtonStyle.Success),
+                    new ButtonBuilder().setCustomId(`request:${promptId}:no`).setLabel("No").setStyle(ButtonStyle.Danger),
+                );
+                const prompt = await channel.send({ embeds: [embed], components: [row] });
+
+                let approved = false;
+                const expiresAt = Date.now() + APPROVAL_TIMEOUT_MS;
+                while (Date.now() < expiresAt) {
+                    const remaining = expiresAt - Date.now();
+                    try {
+                        const interaction = await prompt.awaitMessageComponent({
+                            componentType: ComponentType.Button,
+                            time: remaining,
+                        });
+                        if (interaction.user.id !== authorizedUserId) {
+                            await interaction.reply({
+                                content: "You are not authorized to approve this action.",
+                                ephemeral: true,
+                            });
+                            continue;
+                        }
+                        approved = interaction.customId.endsWith(":yes");
+                        await interaction.deferUpdate();
+                        break;
+                    } catch {
+                        approved = false;
+                        break;
+                    }
+                }
+
+                const finalEmbed = EmbedBuilder.from(embed)
+                    .setColor(0x242429)
+                    .setFooter({ text: approved ? "Approved" : "Denied or timed out" });
+                await prompt.edit({ embeds: [finalEmbed], components: [] });
+                await notice.edit(`-# Permission ${approved ? "granted" : "denied"}.`);
+
+                return approved ? "Approved." : "Denied.";
+            }
+
+            if (call.function.name === "question") {
+                const question = typeof args.question === "string" ? args.question : "";
+                const options = Array.isArray(args.options) ? args.options.map(String) : [];
+                if (options.length < 2 || options.length > 10) {
+                    return "Error: question requires between 2 and 10 options.";
+                }
+                const title = typeof args.title === "string" && args.title.trim()
+                    ? args.title.trim()
+                    : "Question";
+
+                const channel = msg.channel as TextChannel;
+                const embed = new EmbedBuilder()
+                    .setTitle(title)
+                    .setDescription(question || "(no question)")
+                    .setColor(0x242429);
+
+                const promptId = Math.random().toString(36).slice(2);
+                const menu = new StringSelectMenuBuilder()
+                    .setCustomId(`question:${promptId}`)
+                    .setMinValues(1)
+                    .setMaxValues(1)
+                    .addOptions(
+                        options.map((opt, idx) => ({
+                            label: opt.length > 100 ? opt.slice(0, 97) + "…" : opt,
+                            value: String(idx),
+                        }))
+                    );
+                const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu);
+
+                const prompt = await channel.send({ embeds: [embed], components: [row] });
+                let selected: string | null = null;
+                let selectedUser = "";
+                let selectedUserId = "";
+
+                try {
+                    const interaction = await prompt.awaitMessageComponent({
+                        componentType: ComponentType.StringSelect,
+                        time: APPROVAL_TIMEOUT_MS,
+                    });
+                    const idx = parseInt(interaction.values[0] || "", 10);
+                    selected = Number.isFinite(idx) && options[idx] ? options[idx] : null;
+                    const member = interaction.member as any;
+                    selectedUser = member?.displayName || interaction.user.username;
+                    selectedUserId = interaction.user.id;
+                    await interaction.deferUpdate();
+                } catch {
+                    selected = null;
+                }
+
+                const footer = selected
+                    ? `Selected: ${selected} (${selectedUser})`
+                    : "Timed out";
+                const finalEmbed = EmbedBuilder.from(embed).setFooter({ text: footer });
+                await prompt.edit({ embeds: [finalEmbed], components: [] });
+
+                if (!selected) {
+                    return "No selection (timed out).";
+                }
+                return `Selected: ${selected}\nUser: ${selectedUser} (${selectedUserId})`;
+            }
+
+            return undefined;
+        };
+
         try {
             const { text: responseText, reasoningSummary } = await runAgent(
                 history,
@@ -542,10 +679,11 @@ export async function startDiscord(): Promise<void> {
                 requestToolApproval,
                 onToolBatch,
                 onDeepResearchSummary,
+                executeTool,
             );
 
             // Prefix reasoning summary if it's a real summary (not fallback)
-            let finalResponse = responseText;
+        let finalResponse = responseText;
             if (reasoningSummary && reasoningSummary.length < 200 &&
                 !reasoningSummary.includes("no summary") &&
                 !reasoningSummary.includes("failed") &&
@@ -556,10 +694,12 @@ export async function startDiscord(): Promise<void> {
 ${responseText}`;
             }
 
-            const updateTag = await getUpdateTag();
-            if (updateTag) {
-                finalResponse += `\n-# ⚠️ An update is available (${updateTag}). Run \`opoclaw update\` to update, or ask your agent to perform the update.`;
-            }
+        finalResponse = sanitizeModelOutput(finalResponse);
+
+        const updateTag = await getUpdateTag();
+        if (updateTag) {
+            finalResponse += `\n-# ⚠️ An update is available (${updateTag}). Run \`opoclaw update\` to update, or ask your agent to perform the update.`;
+        }
 
             // Split into chunks
             const chunks = splitMessage(finalResponse);
@@ -626,7 +766,11 @@ ${responseText}`;
         await addReaction(msg, EYES);
     });
 
-    function splitMessage(text: string, maxLen = 1990): string[] {
+function sanitizeModelOutput(text: string): string {
+    return text.replace(/\[id:\d+\]\s*/g, "");
+}
+
+function splitMessage(text: string, maxLen = 1990): string[] {
         if (text.length <= maxLen) return [text];
         const chunks: string[] = [];
         let i = 0;

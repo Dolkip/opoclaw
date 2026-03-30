@@ -249,6 +249,55 @@ export const TOOLS: { [id: string]: any } = {
             },
         },
     },
+    request_permission: {
+        type: "function",
+        function: {
+            name: "request_permission",
+            description:
+                "Request authorization from the configured authorized_user_id with a custom message. Discord-only.",
+            parameters: {
+                type: "object",
+                properties: {
+                    message: {
+                        type: "string",
+                        description: "Message describing what approval is needed.",
+                    },
+                    title: {
+                        type: "string",
+                        description: "Optional title for the approval prompt.",
+                    },
+                },
+                required: ["message"],
+            },
+        },
+    },
+    question: {
+        type: "function",
+        function: {
+            name: "question",
+            description:
+                "Ask a multiple-choice question in Discord and return the selected option.",
+            parameters: {
+                type: "object",
+                properties: {
+                    question: {
+                        type: "string",
+                        description: "The question to ask.",
+                    },
+                    options: {
+                        type: "array",
+                        items: { type: "string" },
+                        description: "Answer options (2-10).",
+                    },
+                    title: {
+                        type: "string",
+                        description: "Optional title for the embed.",
+                    },
+                },
+                required: ["question", "options"],
+            },
+        },
+    },
     shell: {
         type: "function",
         function: {
@@ -686,6 +735,12 @@ export async function handleToolCall(
                 break;
             }
             throw new Error(lastErr || "react_message failed after retries.");
+        }
+        case "request_permission": {
+            throw new Error("request_permission is only available in Discord.");
+        }
+        case "question": {
+            throw new Error("question is only available in Discord.");
         }
         case "shell": {
             if (!shellSetUp) {
