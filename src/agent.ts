@@ -698,7 +698,7 @@ export async function runAgent(
         }
 
         // No tool calls — final text response
-        const responseText = text ?? "(no response)";
+        const responseText = text ?? "";
 
         // Generate reasoning summary if enabled and we have reasoning text
         let reasoningSummaryText: string | undefined;

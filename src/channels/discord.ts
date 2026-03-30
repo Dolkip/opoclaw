@@ -209,9 +209,10 @@ async function buildChannelHistory(msg: Message): Promise<ChatMessage[]> {
             if (!cleanedText) continue;
             history.push({ role: "assistant", content: `${idPrefix}${cleanedText}${reactionSuffix}` });
         } else {
+            const shownText = text || "";
             history.push({
                 role: "user",
-                content: `${idPrefix}[${m.author.displayName} (${m.author.username})]: ${text || "(attachment)"}${reactionSuffix}`,
+                content: `${idPrefix}[${m.author.displayName} (${m.author.username})]: ${shownText}${reactionSuffix}`,
             });
         }
     }
@@ -356,7 +357,7 @@ export async function startDiscord(): Promise<void> {
 
         if (visionEnabled && imageAttachments.length > 0) {
             const parts: any[] = [];
-        const text = `${idPrefix}[${msg.author.displayName} (${msg.author.username})]: ${userText || "(image)"}${currentReactionSuffix}`;
+        const text = `${idPrefix}[${msg.author.displayName} (${msg.author.username})]: ${userText || ""}${currentReactionSuffix}`;
             parts.push({ type: "text", text });
             for (const img of imageAttachments) {
                 parts.push({ type: "image_url", image_url: { url: img.url } });
@@ -365,7 +366,7 @@ export async function startDiscord(): Promise<void> {
         } else {
         history.push({
             role: "user",
-            content: `${idPrefix}[${msg.author.displayName} (${msg.author.username})]: ${userText || "(empty message)"}${currentReactionSuffix}`,
+            content: `${idPrefix}[${msg.author.displayName} (${msg.author.username})]: ${userText || ""}${currentReactionSuffix}`,
         });
         }
 
@@ -560,8 +561,10 @@ export async function startDiscord(): Promise<void> {
                 const notice = await channel.send("-# Requesting permission...");
                 const embed = new EmbedBuilder()
                     .setTitle(title)
-                    .setDescription(message || "(no message)")
                     .setColor(0x242429);
+                if (message) {
+                    embed.setDescription(message);
+                }
 
                 const promptId = Math.random().toString(36).slice(2);
                 const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -617,8 +620,10 @@ export async function startDiscord(): Promise<void> {
                 const channel = msg.channel as TextChannel;
                 const embed = new EmbedBuilder()
                     .setTitle(title)
-                    .setDescription(question || "(no question)")
                     .setColor(0x242429);
+                if (question) {
+                    embed.setDescription(question);
+                }
 
                 const promptId = Math.random().toString(36).slice(2);
                 const menu = new StringSelectMenuBuilder()
@@ -701,8 +706,12 @@ ${responseText}`;
             finalResponse += `\n-# ⚠️ An update is available (${updateTag}). Run \`opoclaw update\` to update, or ask your agent to perform the update.`;
         }
 
-            // Split into chunks
-            const chunks = splitMessage(finalResponse);
+        if (!finalResponse.trim()) {
+            return;
+        }
+
+        // Split into chunks
+        const chunks = splitMessage(finalResponse);
             let fileSent = false;
 
             for (let i = 0; i < chunks.length; i++) {
