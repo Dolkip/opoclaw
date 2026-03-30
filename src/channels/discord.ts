@@ -196,6 +196,14 @@ function renderSystemPrompt(template: string): string {
         .replaceAll("{{TIMEZONE}}", tz);
 }
 
+function formatMentions(text: string, msg: Message): string {
+    return text.replace(/<@!?(\d+)>/g, (_full, id) => {
+        const user = msg.mentions.users.get(id);
+        const name = user?.username || `user_${id}`;
+        return `@${name}`;
+    });
+}
+
 async function isHibernating(): Promise<boolean> {
     try {
         return await Bun.file(HIBERNATE_FILE).exists();
@@ -241,7 +249,7 @@ async function buildChannelHistory(msg: Message): Promise<ChatMessage[]> {
         if (m.id === msg.id) continue;
 
         const isBot = m.author.id === client.user!.id;
-        let text = m.content.replace(/<@!?\d+>/g, "").trim();
+        let text = formatMentions(m.content, m).trim();
         if (!text && m.attachments.size === 0) continue;
 
         const reactionList = Array.from(m.reactions.cache.values())
@@ -395,7 +403,7 @@ export async function startDiscord(): Promise<void> {
     if (pollSummary) systemPromptParts.push(pollSummary);
         const systemPrompt = systemPromptParts.join("\n") || "You are a helpful assistant.";
 
-        const userText = msg.content.replace(/<@!?\d+>/g, "").trim();
+    const userText = formatMentions(msg.content, msg).trim();
     const idPrefix = `[id:${msg.id}] `;
         const visionEnabled = getVisionEnabled(config);
         const imageAttachments = visionEnabled
