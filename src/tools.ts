@@ -298,6 +298,33 @@ export const TOOLS: { [id: string]: any } = {
             },
         },
     },
+    poll: {
+        type: "function",
+        function: {
+            name: "poll",
+            description:
+                "Create a live poll in Discord with dynamic results.",
+            parameters: {
+                type: "object",
+                properties: {
+                    question: {
+                        type: "string",
+                        description: "The poll question.",
+                    },
+                    options: {
+                        type: "array",
+                        items: { type: "string" },
+                        description: "Poll options (2-10).",
+                    },
+                    title: {
+                        type: "string",
+                        description: "Optional title for the poll embed.",
+                    },
+                },
+                required: ["question", "options"],
+            },
+        },
+    },
     shell: {
         type: "function",
         function: {
@@ -741,6 +768,9 @@ export async function handleToolCall(
         }
         case "question": {
             throw new Error("question is only available in Discord.");
+        }
+        case "poll": {
+            throw new Error("poll is only available in Discord.");
         }
         case "shell": {
             if (!shellSetUp) {

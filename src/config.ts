@@ -210,6 +210,7 @@ export function getTools(config: OpoclawConfig): any[] {
         TOOLS.react_message,
         TOOLS.request_permission,
         TOOLS.question,
+        TOOLS.poll,
         TOOLS.shell,
     ];
 
