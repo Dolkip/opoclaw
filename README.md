@@ -11,3 +11,21 @@ You can find the installation scripts in the Releases tab, or copy one of these 
 macOS and Linux: `curl -fsSL https://raw.githubusercontent.com/oponic/opoclaw/refs/heads/main/installers/setup.sh | bash`
 
 Windows: `irm https://raw.githubusercontent.com/oponic/opoclaw/refs/heads/main/installers/setup.ps1 | iex`
+
+## Docker
+Build and run with Docker (network access is enabled by default, required for search/web fetch):
+
+```bash
+docker build -t opoclaw .
+docker run --rm -it \
+  -v "$PWD/config.toml:/app/config.toml" \
+  -v "$PWD/workspace:/app/workspace" \
+  -v "$PWD/usage.json:/app/usage.json" \
+  opoclaw
+```
+
+Or with Docker Compose:
+
+```bash
+docker compose up --build -d
+```

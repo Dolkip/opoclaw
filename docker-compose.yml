@@ -1,0 +1,10 @@
+services:
+  opoclaw:
+    build: .
+    restart: unless-stopped
+    environment:
+      OPOCLAW_CONFIG_PATH: /app/config.toml
+    volumes:
+      - ./config.toml:/app/config.toml
+      - ./workspace:/app/workspace
+      - ./usage.json:/app/usage.json
