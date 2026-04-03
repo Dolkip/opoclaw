@@ -527,20 +527,6 @@ let shellSetUp = false;
 
 const dec = new TextDecoder();
 
-function decodeHtmlEntities(input: string): string {
-    return input
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .replace(/&nbsp;/g, " ");
-}
-
-function stripHtml(input: string): string {
-    return input.replace(/<[^>]*>/g, "").trim();
-}
-
 function formatSearchResults(results: SearchResult[], count: number): string {
     if (!results.length) return "(no results)";
     return results
@@ -589,35 +575,6 @@ async function fetchWithTimeout(url: string, timeoutMs = 5000, init?: RequestIni
         clearTimeout(id);
     }
 }
-
-async function searxSearch(query: string, count = 5): Promise<string> {
-    const instances = [
-        "https://searx.be",
-        "https://searx.tiekoetter.com",
-        "https://search.projectsegfau.lt",
-    ];
-
-    for (const base of instances) {
-        try {
-            const url = `${base}/search?q=${encodeURIComponent(query)}&format=json&language=en`;
-            const res = await fetchWithTimeout(url, 6000);
-            if (!res.ok) continue;
-            const data: any = await res.json();
-            const results = Array.isArray(data?.results) ? data.results : [];
-            const mapped = results
-                .filter((r: any) => r?.url && r?.title)
-                .slice(0, count)
-                .map((r: any, i: number) => `${i + 1}. ${r.title}\n${r.url}\n${r.content || ""}`.trim());
-            if (mapped.length > 0) {
-                return mapped.join("\n\n");
-            }
-        } catch {
-            continue;
-        }
-    }
-    return "(no results)";
-}
-
 
 function setNestedValue(obj: Record<string, any>, keyPath: string, value: any): void {
     const parts = keyPath.split(".").map((p) => p.trim()).filter(Boolean);
