@@ -440,8 +440,7 @@ export async function startDiscord(): Promise<void> {
             removeReaction(msg, EYES);
         };
         const toolMessages: { [id: string]: Message } = {};
-        const lessVerboseTools = config.less_verbose_tools ?? false;
-        const showToolMessages = config.show_tool_messages ?? true;
+        const toolCallSummaries = config.tool_call_summaries ?? "full";
         const onToolCall = async (call: ToolCall, uniqueId: string) => {
             if (call.function.name === "deep_research") {
                 await (msg.channel as TextChannel).send(`-# Using Deep Research...`);
@@ -457,8 +456,7 @@ export async function startDiscord(): Promise<void> {
                 await addReaction(msg, TOOL);
                 gotToolCall = true;
             }
-            if (!showToolMessages) return;
-            if (lessVerboseTools) return;
+            if (toolCallSummaries === "off" || toolCallSummaries === "minimal") return;
             // assuming there's only one argument we only want to show that
             let fullText = '-# 🔧  Called `' + call.function.name + '`';
             try {
@@ -489,8 +487,8 @@ export async function startDiscord(): Promise<void> {
             toolMessages[uniqueId] = m;
         };
         const onToolCallError = async (uniqueId: string, error: Error) => {
-            if (!showToolMessages) return;
-            if (lessVerboseTools) {
+            if (toolCallSummaries === "off") return;
+            if (toolCallSummaries === "minimal") {
                 await (msg.channel as TextChannel).send(`-# 🛑 Tool error: ${error.message}`);
                 return;
             }
@@ -501,8 +499,7 @@ export async function startDiscord(): Promise<void> {
         };
 
         const onToolBatch = async (calls: ToolCall[], results: any[]) => {
-            if (!showToolMessages) return;
-            if (!lessVerboseTools) return;
+            if (toolCallSummaries !== "minimal") return;
             try {
                 const summary = await summarizeToolBatch(calls, results, config);
                 const trimmed = summary.trim();
