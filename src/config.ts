@@ -163,6 +163,7 @@ export interface OpoclawConfig {
     search_provider?: "duckduckgo" | "tavily";
     tavily_api_key?: string;
     show_update_notification?: boolean;
+    show_tool_messages?: boolean;
 }
 
 export function loadConfig(): OpoclawConfig {
