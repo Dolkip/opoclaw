@@ -7,6 +7,8 @@
 import { resolve } from "path";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { createInterface } from "readline";
+import TOML from "@iarna/toml";
+import type { OpoclawConfig } from "../src/config.ts";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -24,6 +26,12 @@ const ask = (prompt: string): Promise<string> => {
             resolve(answer.trim());
         });
     });
+};
+
+const askMCQ = async <T extends string>(question: string, answers: T[], defaultAnswer: T): Promise<T> => {
+    const ans = await ask(`${question} [${answers.join("/")}] (${defaultAnswer}): `);
+    const lower = ans.toLowerCase().trim();
+    return (answers.find(a => a === lower) ?? defaultAnswer);
 };
 
 const info = (msg: string) => console.log(`${CYAN}[opoclaw]${RESET} ${msg}`);
@@ -152,56 +160,60 @@ async function main() {
 
     // ── Discord Token ──────────────────────────────────────────────────────
 
-    let discordToken = await ask("Discord bot token: ");
+    const discordToken = await ask("Discord bot token: ");
     if (!discordToken) {
         console.error(`${YELLOW}Error: Discord token is required.${RESET}`);
         console.log("Create a bot at https://discord.com/developers/applications");
         process.exit(1);
     }
 
-    // ── OpenRouter Key ─────────────────────────────────────────────────────
-
-    let openrouterKey = await ask("OpenRouter API key (sk-or-v1-...): ");
-    if (!openrouterKey) {
-        console.error(`${YELLOW}Error: OpenRouter key is required.${RESET}`);
-        console.log("Get one at https://openrouter.ai/keys");
-        process.exit(1);
-    }
-
     // ── Provider ─────────────────────────────────────────────────────────────
-    const providerAns = await ask("Provider [openrouter/ollama/custom] (openrouter): ");
-    const p = providerAns.toLowerCase();
-    const provider: "openrouter" | "ollama" | "custom" = p === "ollama" ? "ollama" : p === "custom" ? "custom" : "openrouter";
 
-    let ollamaBaseURL = "", ollamaModel = "";
-    let customBaseURL = "", customAPIKey = "", customModel = "";
-    let customApiType = "openai";
-    let customAnthropicVersion = "";
-    let customMaxTokens = "";
+    const provider = await askMCQ("Provider", ["openrouter", "ollama", "custom"] as const, "openrouter");
+
+    let providerSection: OpoclawConfig["provider"];
+
     if (provider === "ollama") {
-        ollamaBaseURL = await ask("Ollama base URL [http://localhost:11434]: ") || "http://localhost:11434";
-        ollamaModel = await ask("Ollama model [llama3.2]: ") || "llama3.2";
+        const ollamaBaseURL = await ask("Ollama base URL [http://localhost:11434]: ") || "http://localhost:11434";
+        const ollamaModel = await ask("Ollama model [llama3.2]: ") || "llama3.2";
+        providerSection = {
+            active: "ollama",
+            ollama: { base_url: ollamaBaseURL, model: ollamaModel },
+        };
     } else if (provider === "custom") {
-        const apiTypeAns = await ask("Custom API type [openai/anthropic] (openai): ");
-        const apiType = apiTypeAns.toLowerCase();
-        customApiType = apiType === "anthropic" ? "anthropic" : "openai";
+        const customApiType = await askMCQ("Custom API type", ["openai", "anthropic"] as const, "openai");
         if (customApiType === "anthropic") {
-            customBaseURL = await ask("Anthropic base URL [https://api.anthropic.com]: ") || "https://api.anthropic.com";
-            customAPIKey = await ask("Anthropic API key (sk-ant-...): ");
-            customModel = await ask("Anthropic model name (e.g. claude-3-5-sonnet-20240620): ");
-            customAnthropicVersion = await ask("Anthropic version [2023-06-01]: ") || "2023-06-01";
-            customMaxTokens = await ask("Max output tokens [1024]: ") || "1024";
+            const customBaseURL = await ask("Anthropic base URL [https://api.anthropic.com]: ") || "https://api.anthropic.com";
+            const customAPIKey = await ask("Anthropic API key (sk-ant-...): ");
+            const customModel = await ask("Anthropic model name (e.g. claude-3-5-sonnet-20240620): ");
+            const customAnthropicVersion = await ask("Anthropic version [2023-06-01]: ") || "2023-06-01";
+            const customMaxTokens = parseInt(await ask("Max output tokens [1024]: ") || "1024", 10);
+            providerSection = {
+                active: "custom",
+                custom: { base_url: customBaseURL, api_key: customAPIKey, model: customModel, api_type: "anthropic", anthropic_version: customAnthropicVersion, max_tokens: customMaxTokens },
+            };
         } else {
-            customBaseURL = await ask("Base URL (no /v1/chat/completions): ");
-            customAPIKey = await ask("API key (blank if none): ");
-            customModel = await ask("Model name: ");
+            const customBaseURL = await ask("Base URL (no /v1/chat/completions): ");
+            const customAPIKey = await ask("API key (blank if none): ");
+            const customModel = await ask("Model name: ");
+            providerSection = {
+                active: "custom",
+                custom: { base_url: customBaseURL, api_key: customAPIKey, model: customModel, api_type: "openai" },
+            };
         }
+    } else {
+        const openrouterKey = await ask("OpenRouter API key (sk-or-v1-...): ");
+        if (!openrouterKey) {
+            console.error(`${YELLOW}Error: OpenRouter key is required.${RESET}`);
+            console.log("Get one at https://openrouter.ai/keys");
+            process.exit(1);
+        }
+        const openrouterModel = await ask("Model ID [openrouter/auto]: ") || "openrouter/auto";
+        providerSection = {
+            active: "openrouter",
+            openrouter: { api_key: openrouterKey, model: openrouterModel },
+        };
     }
-
-    // ── Model ──────────────────────────────────────────────────────────────
-
-    const model = await ask("Model ID [openrouter/auto]: ");
-    const openrouterModel = model || "openrouter/auto";
 
     // ── Allow Bots ─────────────────────────────────────────────────────────
 
@@ -223,19 +235,27 @@ async function main() {
         const summaryAns = await ask("Enable reasoning summaries? (y/N) [default: N, requires extra API call]: ");
         reasoningSummary = summaryAns.toLowerCase() === "y";
         if (reasoningSummary) {
-            const summaryModel = await ask("Summary model (blank = main model): ");
-            reasoningSummaryModel = summaryModel || "";
+            reasoningSummaryModel = await ask("Summary model (blank = main model): ");
         }
     }
 
-    const enableTomlAns = await ask("Use TOML files (memory.toml, identity.toml) instead of markdown?\nThis is recommended for new agents, but shouldn't be used if you're migrating an existing agent to opoclaw. (y/N): ");
+    const enableTomlAns = await ask(
+        "Use TOML files (memory.toml, identity.toml) instead of markdown?\n" +
+        "This is recommended for new agents, but shouldn't be used if you're migrating an existing agent to opoclaw. (y/N): "
+    );
     const enableToml = enableTomlAns.toLowerCase() === "y";
-    const basicToolsAns = await ask("Enable read_file, edit_file, list_files tools? (sandboxed)\nIf disabled, the agent will still be able to use the shell to manipulate files. (Y/n): ");
-    const basicTools = basicToolsAns.toLowerCase() === "y";
 
-    const toolCallSummariesAns = await ask("Tool call summaries: full (per-call messages), minimal (reaction + batch summary), off (reaction only) [default: full]: ");
-    const toolCallSummariesRaw = toolCallSummariesAns.toLowerCase().trim();
-    const toolCallSummaries = (toolCallSummariesRaw === "minimal" || toolCallSummariesRaw === "off") ? toolCallSummariesRaw : "full";
+    const basicToolsAns = await ask(
+        "Enable read_file, edit_file, list_files tools? (sandboxed)\n" +
+        "If disabled, the agent will still be able to use the shell to manipulate files. (Y/n): "
+    );
+    const basicTools = basicToolsAns.toLowerCase() !== "n";
+
+    const toolCallSummaries = await askMCQ(
+        "Tool call summaries: full (per-call messages), minimal (reaction + batch summary), off (reaction only)",
+        ["full", "minimal", "off"] as const,
+        "full"
+    );
 
     // ── Tavily Search ──────────────────────────────────────────────────────
 
@@ -249,61 +269,30 @@ async function main() {
         }
     }
 
-    // ── Write config.toml ──────────────────────────────────────────────────
+    // ── Build typed config ─────────────────────────────────────────────────
 
     header("Writing config");
 
-    let toml = "";
-    toml += `enable_reasoning = ${enableReasoning ? "true" : "false"}\n`;
-    toml += `reasoning_summary = ${reasoningSummary ? "true" : "false"}\n`;
-    if (reasoningSummaryModel) {
-        toml += `reasoning_summary_model = "\${reasoningSummaryModel}"\n`;
-    }
-    if (authorizedUserId) {
-        toml += `authorized_user_id = "${authorizedUserId}"\n`;
-    }
-    toml += `use_toml_files = ${enableToml ? "true" : "false"}\n`;
-    toml += `basic_tools = ${basicTools ? "true" : "false"}\n`;
-    if (toolCallSummaries !== "full") {
-        toml += `tool_call_summaries = "${toolCallSummaries}"\n`;
-    }
-    toml += `\n[channel.discord]\n`;
-    toml += `enabled = true\n`;
-    toml += `token = "${discordToken}"\n`;
-    toml += `allow_bots = ${allowBots ? "true" : "false"}\n`;
-    toml += `\n[provider]\n`;
-    toml += `active = "${provider}"\n`;
-    toml += `\n[provider.openrouter]\n`;
-    toml += `api_key = "${openrouterKey}"\n`;
-    toml += `model = "${openrouterModel}"\n`;
+    const config: OpoclawConfig = {
+        enable_reasoning: enableReasoning,
+        reasoning_summary: reasoningSummary,
+        use_toml_files: enableToml,
+        basic_tools: basicTools,
+        channel: {
+            discord: {
+                enabled: true,
+                token: discordToken,
+                allow_bots: allowBots,
+            },
+        },
+        provider: providerSection,
+        ...(reasoningSummaryModel ? { reasoning_summary_model: reasoningSummaryModel } : {}),
+        ...(authorizedUserId ? { authorized_user_id: authorizedUserId } : {}),
+        ...(toolCallSummaries !== "full" ? { tool_call_summaries: toolCallSummaries } : {}),
+        ...(useTavily && tavilyApiKey ? { search_provider: "tavily" as const, tavily_api_key: tavilyApiKey } : {}),
+    };
 
-    // Provider config (nested sections)
-    if (provider === "ollama") {
-        toml += '\n[provider.ollama]\n';
-        toml += 'base_url = "' + ollamaBaseURL + '"\n';
-        toml += 'model = "' + ollamaModel + '"\n';
-    } else if (provider === "custom") {
-        toml += '\n[provider.custom]\n';
-        toml += 'base_url = "' + customBaseURL + '"\n';
-        toml += 'api_key = "' + customAPIKey + '"\n';
-        toml += 'model = "' + customModel + '"\n';
-        toml += 'api_type = "' + customApiType + '"\n';
-        if (customApiType === "anthropic") {
-            if (customAnthropicVersion) {
-                toml += 'anthropic_version = "' + customAnthropicVersion + '"\n';
-            }
-            if (customMaxTokens) {
-                toml += 'max_tokens = ' + customMaxTokens + '\n';
-            }
-        }
-    }
-
-    if (useTavily && tavilyApiKey) {
-        toml += `search_provider = "tavily"\n`;
-        toml += `tavily_api_key = "${tavilyApiKey}"\n`;
-    }
-
-    writeFileSync(CONFIG_FILE, toml);
+    writeFileSync(CONFIG_FILE, TOML.stringify(config as TOML.JsonMap));
     ok(`Config written to ${CONFIG_FILE}`);
 
     // ── Generate workspace ─────────────────────────────────────────────────
@@ -317,6 +306,7 @@ async function main() {
     function getFileContent(filename: string, content: string): string {
         return content.replaceAll("<filename>", filename);
     }
+
     const filesMd: Record<string, string> = {
         "AGENTS.md": DEFAULT_AGENTS_MD,
         "SOUL.md": DEFAULT_SOUL_MD,
