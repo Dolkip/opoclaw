@@ -10,9 +10,7 @@
 - [x] `run_background_subagent` tool
 - [ ] reply awareness
 - [ ] thread creation
-- [ ] return of superior installers
-- [ ] plugins
-- [ ] actual shell access
+- [ ] shell passthrough
 - [x] tui for direct communication
 - [x] fix up tools
 - [x] gateway manager
