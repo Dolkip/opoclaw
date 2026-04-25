@@ -37,7 +37,7 @@ const client = new Client({
     ],
 });
 
-const version = exec("git describe --tags --abbrev=0 2>/dev/null || echo ''", { cwd: OP_DIR })
+const VERSION = exec("git describe --tags --abbrev=0 2>/dev/null || echo ''", { cwd: OP_DIR })
 
 const EYES = "👀";
 const THINKING = "🤔";
