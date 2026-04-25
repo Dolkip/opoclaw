@@ -20,6 +20,7 @@ export type ToolSchema = {
 export type ToolContext = {
     config: OpoclawConfig;
     session: AgentSession;
+    onDeepResearchSummary?: (summary: string) => Promise<void>;
     setPendingFileSend?: (value: PendingFileSend) => void;
 };
 

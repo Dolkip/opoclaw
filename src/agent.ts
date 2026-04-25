@@ -1,9 +1,7 @@
 import { getTools, handleToolCall, type ToolContext } from "./tools/index.ts";
 import type { ToolSchema } from "./tools/types.ts";
 import { getApiBaseUrl, getApiKey, getModelId, getActiveProvider, type OpoclawConfig } from "./config.ts";
-import { dirname, join } from "path";
-import { mkdir } from "fs/promises";
-import { fileURLToPath } from "url";
+import { recordUsage } from "./usage.ts";
 
 interface Message {
     role: "system" | "user" | "assistant" | "tool";
@@ -28,39 +26,6 @@ interface ToolResult {
     output: string;
 }
 
-interface UsageStats {
-    total: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number };
-    sessions: Array<{
-        timestamp: string;
-        model: string;
-        input: number;
-        output: number;
-        cacheRead: number;
-        cacheWrite: number;
-        cost: number;
-    }>;
-}
-
-function normalizeWindowsPath(p: string): string {
-    if (process.platform === "win32" && /^\/[A-Za-z]:\//.test(p)) {
-        return p.slice(1);
-    }
-    return p;
-}
-
-function getUsageFilePath(): string {
-  const rawPath = normalizeWindowsPath(fileURLToPath(new URL("../usage.json", import.meta.url)));
-  const dir = dirname(rawPath);
-  // If the directory is root, use a subdirectory instead
-  if (dir === "/" || /^[A-Za-z]:\\$/.test(dir) || dir === ".") {
-    // Fallback to a data directory inside the project
-    const fallback = join(dirname(rawPath), "data", "usage.json");
-    return fallback;
-  }
-  return rawPath;
-}
-
-const USAGE_FILE = getUsageFilePath();
 
 function isAnthropicCustom(config: OpoclawConfig): boolean {
     return config.provider?.active === "custom" && config.provider?.custom?.api_type === "anthropic";
@@ -140,55 +105,6 @@ function buildAnthropicMessages(messages: Message[]): { system: string; messages
     return { system, messages: out };
 }
 
-async function loadUsage(): Promise<UsageStats> {
-    try {
-        const file = Bun.file(USAGE_FILE);
-        if (await file.exists()) {
-            return await file.json();
-        }
-    } catch { }
-    return { total: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 }, sessions: [] };
-}
-
-async function saveUsage(stats: UsageStats): Promise<void> {
-    try {
-        await mkdir(dirname(USAGE_FILE), { recursive: true });
-    } catch (err) {
-        // If we can't create directory (e.g., permission denied), log warning and continue
-        console.warn(`Could not create directory for usage file: ${err}`);
-    }
-    try {
-        await Bun.write(USAGE_FILE, JSON.stringify(stats, null, 2));
-    } catch (err) {
-        // If writing fails, log warning but don't throw (usage tracking is non-critical)
-        console.warn(`Could not write usage file: ${err}`);
-    }
-}
-
-async function recordUsage(usage: any, model: string): Promise<void> {
-    if (!usage) return;
-    const stats = await loadUsage();
-    const entry = {
-        timestamp: new Date().toISOString(),
-        model,
-        input: usage.prompt_tokens || 0,
-        output: usage.completion_tokens || 0,
-        cacheRead: usage.prompt_tokens_details?.cached_tokens || 0,
-        cacheWrite: usage.prompt_tokens_details?.cache_write_tokens || 0,
-        cost: usage.cost || 0,
-    };
-    stats.sessions.push(entry);
-    stats.total.input += entry.input;
-    stats.total.output += entry.output;
-    stats.total.cacheRead += entry.cacheRead;
-    stats.total.cacheWrite += entry.cacheWrite;
-    stats.total.cost += entry.cost;
-    // Keep last 500 entries
-    if (stats.sessions.length > 500) {
-        stats.sessions = stats.sessions.slice(-500);
-    }
-    await saveUsage(stats);
-}
 
 async function streamCompletion(
     messages: Message[],
@@ -565,7 +481,7 @@ export interface AgentCallbacks {
     executeTool?: (call: ToolCall, args: Record<string, any>) => Promise<string | undefined>   
 }
 
-type BackgroundSubagentJob = {
+export type BackgroundSubagentJob = {
     id: string;
     label: string;
     request: string;
@@ -577,6 +493,7 @@ type BackgroundSubagentJob = {
 export class AgentSession {
     sessionId: string | undefined;
     messages: Message[];
+    currentSystemPrompt: string = "";
     pendingFileSend: { path: string; caption: string } | null = null;
     private backgroundJobs = new Map<string, BackgroundSubagentJob>();
     private pendingCompaction: { summary: string; preserveRecent: number } | null = null;
@@ -584,6 +501,35 @@ export class AgentSession {
     constructor(sessionId?: string) {
         this.sessionId = sessionId;
         this.messages = [];
+    }
+
+    setPendingCompaction(summary: string, preserveRecent: number): void {
+        this.pendingCompaction = { summary, preserveRecent };
+    }
+
+    registerBackgroundJob(job: BackgroundSubagentJob): void {
+        if(this.backgroundJobs.get(job.id)?.status == "running") {
+            throw new Error("Job id already in use");
+        }
+        this.backgroundJobs.set(job.id, job);
+    }
+
+    async compact(preserveRecent: number, config: OpoclawConfig): Promise<string> {
+        const current = this.messages.slice(0, Math.max(0, this.messages.length - 1));
+        const transcript = this.serializeMessagesForPrompt(current);
+        const summary = await this.runSubagentRequest(
+            "Compress this conversation context into 2-4 concise paragraphs preserving key facts, decisions, constraints, and unresolved tasks.\n\n" + transcript,
+            false,
+            this.currentSystemPrompt,
+            config,
+        );
+        this.setPendingCompaction(summary, preserveRecent);
+        return `Context compaction prepared. Summary length: ${summary.length} chars.`;
+    }
+
+    async deepResearch(query: string, config: OpoclawConfig, onSearchSummary?: (summary: string) => Promise<void>): Promise<string> {
+        const sessionId = this.sessionId ? `${this.sessionId}-deepresearch-${Date.now()}` : undefined;
+        return runDeepResearch(query, config, onSearchSummary, sessionId);
     }
 
     addMessage(msg: Message): void {
@@ -606,7 +552,7 @@ export class AgentSession {
         }
     }
 
-    private serializeMessagesForPrompt(messages: Message[]): string {
+    serializeMessagesForPrompt(messages: Message[]): string {
         return messages
             .map((m) => {
                 const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "");
@@ -616,7 +562,7 @@ export class AgentSession {
             .slice(0, 120000);
     }
 
-    private async runSubagentRequest(
+    async runSubagentRequest(
         request: string,
         includeContext: boolean,
         parentSystemPrompt: string,
@@ -723,6 +669,7 @@ export class AgentSession {
         callbacks: AgentCallbacks,
         options?: { maxIterations?: number; tools?: ToolSchema[] }
     ): Promise<{ text: string; reasoningSummary?: string; ranTools?: boolean }> {
+        this.currentSystemPrompt = systemPrompt;
         const systemMessage: Message = { role: "system", content: systemPrompt };
 
         let firstTokenFired = false;
@@ -775,119 +722,12 @@ export class AgentSession {
                                 const handled = await callbacks.executeTool(tc, args);
                                 if (handled !== undefined) return handled;
                             }
-                            if (tc.function.name === "compact") {
-                                const preserveRecentRaw = Number(args.preserve_recent_messages ?? 6);
-                                const preserveRecent = Number.isFinite(preserveRecentRaw)
-                                    ? Math.max(2, Math.min(20, Math.round(preserveRecentRaw)))
-                                    : 6;
-                                const current = this.messages.slice(0, Math.max(0, this.messages.length - 1));
-                                const transcript = this.serializeMessagesForPrompt(current);
-                                const summary = await this.runSubagentRequest(
-                                    "Compress this conversation context into 2-4 concise paragraphs preserving key facts, decisions, constraints, and unresolved tasks.\n\n" + transcript,
-                                    false,
-                                    systemPrompt,
-                                    config,
-                                );
-                                this.pendingCompaction = { summary, preserveRecent };
-                                return `Context compaction prepared. Summary length: ${summary.length} chars.`;
-                            }
-                            if (tc.function.name === "run_subagent") {
-                                const request = String(args.request || "").trim();
-                                if (!request) throw new Error("Missing 'request' argument for run_subagent.");
-                                const includeContext = args.include_context !== false;
-                                const output = await this.runSubagentRequest(request, includeContext, systemPrompt, config);
-                                return output;
-                            }
-                            if (tc.function.name === "run_background_subagent") {
-                                const request = String(args.request || "").trim();
-                                if (!request) throw new Error("Missing 'request' argument for run_background_subagent.");
-                                const includeContext = args.include_context !== false;
-                                const label = String(args.label || `bg-${Date.now()}`);
-                                const id = `subbg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-                                const job: BackgroundSubagentJob = {
-                                    id,
-                                    label,
-                                    request,
-                                    status: "running",
-                                };
-                                this.backgroundJobs.set(id, job);
-                                void (async () => {
-                                    try {
-                                        const output = await this.runSubagentRequest(
-                                            request,
-                                            includeContext,
-                                            systemPrompt,
-                                            config,
-                                        );
-                                        job.status = "done";
-                                        job.output = output;
-                                    } catch (e: any) {
-                                        job.status = "error";
-                                        job.output = String(e?.message || e || "unknown error");
-                                    }
-                                })();
-                                return `Background subagent started (${id}). Label: ${label}.`;
-                            }
-                            if (tc.function.name === "timer") {
-                                const seconds = Number(args.seconds);
-                                if (isNaN(seconds) || seconds <= 0) throw new Error("Invalid 'seconds' argument for timer. Must be a positive number.");
-                                const label = String(args.label || `timer-${Date.now()}`);
-                                const id = `timer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-                                const job: BackgroundSubagentJob = {
-                                    id,
-                                    label,
-                                    request: `Timer for ${seconds} seconds`,
-                                    status: "running",
-                                };
-                                this.backgroundJobs.set(id, job);
-                                setTimeout(() => {
-                                    job.status = "done";
-                                    job.output = `Timer expired at ${new Date().toLocaleTimeString()}.`;
-                                }, seconds * 1000);
-                                return `Timer set for ${seconds} seconds (${id}). Label: ${label}.`;
-                            }
-                            if (tc.function.name === "session_status") {
-                                const modelId = getModelId(config);
-                                const provider = getActiveProvider(config);
-                                let channel = "unknown";
-                                if (this.sessionId?.startsWith("opoclaw-openai-")) channel = "openai";
-                                else if (this.sessionId?.startsWith("opoclaw-core-")) channel = "core/terminal";
-                                else if (this.sessionId?.includes("discord")) channel = "discord";
-                                else if (this.sessionId?.includes("irc")) channel = "irc";
-
-                                const usageStats = await loadUsage();
-                                const now = new Date();
-                                const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-                                const recentSpending = usageStats.sessions
-                                    .filter(s => new Date(s.timestamp) >= oneDayAgo)
-                                    .reduce((acc, s) => acc + (s.cost || 0), 0);
-
-                                const messageCount = this.messages.length;
-                                let charCount = 0;
-                                for (const m of this.messages) {
-                                    if (typeof m.content === "string") charCount += m.content.length;
-                                    else if (Array.isArray(m.content)) {
-                                        for (const part of m.content) {
-                                            if (part.type === "text") charCount += (part.text || "").length;
-                                        }
-                                    }
-                                }
-                                const estimatedTokens = Math.ceil(charCount / 4);
-
-                                return [
-                                    "Session Status:",
-                                    `- Model: ${modelId} (${provider})`,
-                                    `- Channel: ${channel}`,
-                                    `- Context Usage: ~${estimatedTokens} tokens (${charCount} chars) in ${messageCount} messages.`,
-                                    `- Context Window: Model-dependent (check provider documentation for ${modelId}).`,
-                                    `- Spending (last 24h): $${recentSpending.toFixed(4)}`
-                                ].join("\n");
-                            }
-                            if (tc.function.name === "deep_research") {
-                                const deepResearchSessionId = this.sessionId ? `${this.sessionId}-deepresearch-${Date.now()}` : undefined;
-                                return await runDeepResearch(String(args.query || ""), config, callbacks.onDeepResearchSummary, deepResearchSessionId);
-                            }
-                            return await handleToolCall(tc.function.name, args, { config, session: this, setPendingFileSend: v => { this.pendingFileSend = v; } });
+                            return await handleToolCall(tc.function.name, args, {
+                                config,
+                                session: this,
+                                onDeepResearchSummary: callbacks.onDeepResearchSummary,
+                                setPendingFileSend: v => { this.pendingFileSend = v; },
+                            });
                         };
                         if (callbacks.requestToolApproval) {
                             const approval = await callbacks.requestToolApproval(tc, uniqueId);
