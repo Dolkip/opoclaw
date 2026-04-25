@@ -13,6 +13,9 @@ import {
     EmbedBuilder,
     ComponentType,
     StringSelectMenuBuilder,
+    REST,
+    Routes,
+    type ChatInputCommandInteraction,
 } from "discord.js";
 import { AgentSession, summarizeToolBatch, type Message as ChatMessage, type ToolCall } from "../agent.ts";
 import { requiresToolApproval } from "../tools/index.ts";
@@ -28,6 +31,8 @@ const client = new Client({
         GatewayIntentBits.GuildMessageReactions,
     ],
 });
+
+const version = "implement me"
 
 const EYES = "👀";
 const THINKING = "🤔";
@@ -821,8 +826,46 @@ export async function startDiscord(): Promise<void> {
         return chunks;
     }
 
-    client.once(Events.ClientReady, (c) => {
+    client.once(Events.ClientReady, async (c) => {
         console.log(`Logged in as ${c.user.tag}`);
+
+        const rest = new REST({ version: "10" }).setToken(discordCfg.token!);
+        try {
+            await rest.put(
+                Routes.applicationCommands(client.user!.id),
+                {
+                    body: [
+                        {
+                            name: "about",
+                            description: "About the bot",
+                        },
+                    ],
+                },
+            );
+            console.log("[gateway] Registered slash commands");
+        } catch (e) {
+            console.error("[gateway] Failed to register slash commands:", e);
+        }
+    });
+
+    client.on(Events.InteractionCreate, async (interaction) => {
+        if (!interaction.isChatInputCommand()) return;
+
+        if (interaction.commandName === "about") {
+            const about = `
+\`\`\`
+        ▜
+▛▌▛▌▛▌▛▘▐ ▀▌▌▌▌
+▙▌▙▌▙▌▙▖▐▖█▌▚▚▘
+  ▌
+\`\`\`
+Opoclaw v${VERSION}
+Lightweight Bun AI agent framework
+[https://github.com/oponic/opoclaw](https://github.com/oponic/opoclaw)
+Opo Conglomerate, 2026
+            `;
+            await interaction.reply(about);
+        }
     });
 
     if (!discordCfg?.token) {
