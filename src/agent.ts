@@ -1,4 +1,4 @@
-import { getTools, handleToolCall } from "./tools.ts";
+import { getTools, handleToolCall, type ToolContext } from "./tools.ts";
 import { getApiBaseUrl, getApiKey, getModelId, getActiveProvider, type OpoclawConfig } from "./config.ts";
 import { dirname, join } from "path";
 import { mkdir } from "fs/promises";
@@ -554,7 +554,7 @@ export async function runDeepResearch(
                 let output = "";
                 try {
                     const args = JSON.parse(tc.function.arguments);
-                    output = await handleToolCall(tc.function.name, args, config);
+                    output = await handleToolCall(tc.function.name, args, { config });
                 } catch (e: any) {
                     output = `Error: ${e?.message || e}`;
                 }
@@ -922,7 +922,7 @@ export class AgentSession {
                                 const deepResearchSessionId = this.sessionId ? `${this.sessionId}-deepresearch-${Date.now()}` : undefined;
                                 return await runDeepResearch(String(args.query || ""), config, callbacks.onDeepResearchSummary, deepResearchSessionId);
                             }
-                            return await handleToolCall(tc.function.name, args, config, v => { this.pendingFileSend = v; });
+                            return await handleToolCall(tc.function.name, args, { config, setPendingFileSend: v => { this.pendingFileSend = v; } });
                         };
                         if (callbacks.requestToolApproval) {
                             const approval = await callbacks.requestToolApproval(tc, uniqueId);

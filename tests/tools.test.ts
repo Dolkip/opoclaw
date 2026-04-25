@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, rm, writeFile, readFile, mkdtemp, writeFile as writeFileFs, rm as rmFs } from "fs/promises";
 import { resolve, join } from "path";
 import { tmpdir } from "os";
-import { TOOLS, handleToolCall } from "../src/tools.ts";
+import { handleToolCall, type ToolContext } from "../src/tools.ts";
 import { WORKSPACE_DIR } from "../src/workspace.ts";
+
+const DUMMY_TOOL_CONTEXT: ToolContext = { config: {} as any };
 
 const TEST_DIR = resolve(WORKSPACE_DIR, "__tools_test__");
 
@@ -21,9 +23,9 @@ describe("tools", () => {
   test("read_file + edit_file", async () => {
     await setup();
     const rel = "__tools_test__/a.txt";
-    const content = await handleToolCall("read_file", { path: rel }, {} as any);
+    const content = await handleToolCall("read_file", { path: rel }, DUMMY_TOOL_CONTEXT);
     expect(content).toBe("alpha");
-    await handleToolCall("edit_file", { path: rel, content: "beta" }, {} as any);
+    await handleToolCall("edit_file", { path: rel, content: "beta" }, DUMMY_TOOL_CONTEXT);
     const updated = await readFile(resolve(TEST_DIR, "a.txt"), "utf-8");
     expect(updated).toBe("beta");
     await cleanup();
@@ -31,7 +33,7 @@ describe("tools", () => {
 
   test("list_files returns entries", async () => {
     await setup();
-    const res = await handleToolCall("list_files", {}, {} as any);
+    const res = await handleToolCall("list_files", {}, DUMMY_TOOL_CONTEXT);
     // Normalize path separators to forward slashes for comparison
     const normalizedRes = res.replace(/\\/g, '/');
     expect(normalizedRes).toContain("__tools_test__/a.txt");
@@ -42,7 +44,7 @@ describe("tools", () => {
     await setup();
     const rel = "__tools_test__/a.txt";
     let queued: { path: string; caption: string } | null = null;
-    const res = await handleToolCall("send_file", { path: rel }, {} as any, v => { queued = v; });
+    const res = await handleToolCall("send_file", { path: rel }, { config: {} as any, setPendingFileSend: v => { queued = v; } });
     expect(res).toContain("queued");
     expect(queued!.path).toBe(rel);
     await cleanup();
@@ -52,24 +54,24 @@ describe("tools", () => {
     await setup();
     const rel = "__tools_test__/a.txt";
     // Simulates the runDeepResearch call site which passes no setter
-    await expect(handleToolCall("send_file", { path: rel }, {} as any)).resolves.toContain("queued");
+    await expect(handleToolCall("send_file", { path: rel }, DUMMY_TOOL_CONTEXT)).resolves.toContain("queued");
     await cleanup();
   });
 
   test("error paths for missing args", async () => {
-    await expect(handleToolCall("read_file", {} as any, {} as any)).rejects.toThrow();
-    await expect(handleToolCall("edit_file", { path: "x" } as any, {} as any)).rejects.toThrow();
-    await expect(handleToolCall("search", {} as any, {} as any)).rejects.toThrow();
-    await expect(handleToolCall("use_skill", {} as any, {} as any)).rejects.toThrow();
+    await expect(handleToolCall("read_file", {} as any, DUMMY_TOOL_CONTEXT)).rejects.toThrow();
+    await expect(handleToolCall("edit_file", { path: "x" } as any, DUMMY_TOOL_CONTEXT)).rejects.toThrow();
+    await expect(handleToolCall("search", {} as any, DUMMY_TOOL_CONTEXT)).rejects.toThrow();
+    await expect(handleToolCall("use_skill", {} as any, DUMMY_TOOL_CONTEXT)).rejects.toThrow();
   });
 
   test("use_skill and list_skills", async () => {
     const skillsDir = resolve(WORKSPACE_DIR, "skills", "alpha");
     await mkdir(skillsDir, { recursive: true });
     await writeFile(resolve(skillsDir, "SKILL.md"), "Alpha skill", "utf-8");
-    const list = await handleToolCall("list_skills", {}, {} as any);
+    const list = await handleToolCall("list_skills", {}, DUMMY_TOOL_CONTEXT);
     expect(list).toContain("alpha");
-    const skill = await handleToolCall("use_skill", { name: "alpha" }, {} as any);
+    const skill = await handleToolCall("use_skill", { name: "alpha" }, DUMMY_TOOL_CONTEXT);
     expect(skill).toContain("Alpha skill");
     await rm(resolve(WORKSPACE_DIR, "skills"), { recursive: true, force: true });
   });
@@ -80,7 +82,7 @@ describe("tools", () => {
     await writeFileFs(cfgPath, "enable_reasoning = false\n", "utf-8");
     process.env.OPOCLAW_CONFIG_PATH = cfgPath;
     try {
-      const res = await handleToolCall("edit_config", { key: "enable_reasoning", value: "true" }, {} as any);
+      const res = await handleToolCall("edit_config", { key: "enable_reasoning", value: "true" }, DUMMY_TOOL_CONTEXT);
       expect(res).toContain("Updated config key");
       const updated = await readFile(cfgPath, "utf-8");
       expect(updated).toContain("enable_reasoning = true");
@@ -102,7 +104,7 @@ describe("tools", () => {
     }) as any;
 
     try {
-      const res = await handleToolCall("search", { query: "test", count: "1" } as any, {} as any);
+      const res = await handleToolCall("search", { query: "test", count: "1" } as any, DUMMY_TOOL_CONTEXT);
       expect(res).toContain("https://ddg.example");
       expect(res).toContain("Title");
     } finally {

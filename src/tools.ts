@@ -26,7 +26,7 @@ type ToolSchema = {
     };
 };
 
-type ToolContext = {
+export type ToolContext = {
     config: OpoclawConfig;
     setPendingFileSend?: (value: PendingFileSend) => void;
 };
@@ -862,8 +862,7 @@ export function getToolDefinition(name: string): ToolDefinition | undefined {
 export async function handleToolCall(
     name: string,
     args: ToolArgs,
-    config: OpoclawConfig,
-    setPendingFileSend?: (value: PendingFileSend) => void,
+    context: ToolContext,
 ): Promise<string> {
     console.log(`Handling tool call: ${name} with args ${JSON.stringify(args)}`);
     const definition = getToolDefinition(name);
@@ -873,5 +872,5 @@ export async function handleToolCall(
     if (!definition.handler) {
         throw new Error(`Tool "${name}" is not handled locally.`);
     }
-    return await definition.handler(args, { config, setPendingFileSend });
+    return await definition.handler(args, context);
 }
