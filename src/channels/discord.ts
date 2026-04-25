@@ -22,7 +22,7 @@ import { requiresToolApproval } from "../tools/index.ts";
 import { getFilePath } from "../workspace.ts";
 import { getVisionEnabled, loadConfig, getActiveProvider } from "../config.ts";
 import { isHibernating, setHibernating, buildSystemPrompt, OP_DIR } from "./shared.ts";
-import { execSync } from "child_process";
+import { exec } from "../cli.ts";
 
 const client = new Client({
     intents: [
