@@ -50,14 +50,14 @@ const chip = (s: string, tone: ChipTone = "magenta") => {
   const text = ` ${s} `;
   switch (tone) {
     case "blue": return kleur.bgBlue().white().bold(text);
-    case "green": return kleur.bgGreen().black().bold(text);
-    case "yellow": return kleur.bgYellow().black().bold(text);
+    case "green": return kleur.bgGreen().white().bold(text);
+    case "yellow": return kleur.bgYellow().white().bold(text);
     case "red": return kleur.bgRed().white().bold(text);
-    case "cyan": return kleur.bgCyan().black().bold(text);
+    case "cyan": return kleur.bgCyan().white().bold(text);
     default: return kleur.bgMagenta().white().bold(text);
   }
 };
-const okChip = (s: string) => kleur.bgGreen().black().bold(` ${s} `);
+const okChip = (s: string) => kleur.bgGreen().white().bold(` ${s} `);
 const errChip = (s: string) => kleur.bgRed().white().bold(` ${s} `);
 const toolChip = (s: string) => kleur.bgBlue().white().bold(` ${s} `);
 const banner = () => (
