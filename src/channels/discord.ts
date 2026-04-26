@@ -844,10 +844,10 @@ export async function startDiscord(): Promise<void> {
             if (type === "model") {
                 const modelId = getModelId(config);
                 const provider = getActiveProvider(config);
-                await interaction.reply(`**${modelId}**`);
+                await interaction.reply(`**Model: **\`${modelId}\``);
             } else if (type === "provider") {
                 const provider = getActiveProvider(config);
-                await interaction.reply(`**${provider}**`);
+                await interaction.reply(`**Provider: **\`${provider}\``);
             }
         }
     });
