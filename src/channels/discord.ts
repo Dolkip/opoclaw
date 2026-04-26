@@ -814,16 +814,17 @@ export async function startDiscord(): Promise<void> {
         if (!interaction.isChatInputCommand()) return;
 
         const tag = VERSION.toLowerCase();
-        if (tag.includes("alpha")) return '\u001b[42m alpha \u001b[0m';
-        if (tag.includes("beta")) return '\u001b[41m beta \u001b[0m';
-        if (tag.includes("rc")) return '\u001b[45m rc \u001b[0m';
+        let releaseBadge = "";
+        if (tag.includes("alpha")) releaseBadge = '\u001b[42m alpha \u001b[0m';
+        else if (tag.includes("beta")) releaseBadge = '\u001b[41m beta \u001b[0m';
+        else if (tag.includes("rc")) releaseBadge = '\u001b[45m rc \u001b[0m';
 
         if (interaction.commandName === "about") {
             const about = `
 \`\`\`ansi
  
  ▄▄███▀                      ▀█              
- ▀▀▄▄▄█▄  ▄▀▀▄ ▄▀▀▄ ▄▀▀▄ ▄▀▀▀ █  ▀▀▀▄ █ █ █  ${tag}
+ ▀▀▄▄▄█▄  ▄▀▀▄ ▄▀▀▄ ▄▀▀▄ ▄▀▀▀ █  ▀▀▀▄ █ █ █  ${releaseBadge}
    █████  ▀▄▄▀ █▄▄▀ ▀▄▄▀ ▀▄▄▄ █▄ ████ ▀▄▀▄▀
     ▀▀▀        █
 
@@ -843,10 +844,10 @@ export async function startDiscord(): Promise<void> {
             if (type === "model") {
                 const modelId = getModelId(config);
                 const provider = getActiveProvider(config);
-                await interaction.reply(`**${modelId}**`);
+                await interaction.reply(`**Model:** \`${modelId}\``);
             } else if (type === "provider") {
                 const provider = getActiveProvider(config);
-                await interaction.reply(`**${provider}**`);
+                await interaction.reply(`**Provider:** \`${provider}\``);
             }
         }
     });

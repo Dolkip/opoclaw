@@ -37,15 +37,34 @@ const SYSTEMD_PATH = `/etc/systemd/system/${SYSTEMD_NAME}`;
 
 // ── Colors ─────────────────────────────────────────────────────────────────
 
-const info = (s: string) => console.log(`${kleur.cyan("[opoclaw]")} ${s}`);
-const ok = (s: string) => console.log(`${kleur.green("✓")} ${s}`);
-const warn = (s: string) => console.log(`${kleur.yellow("⚠")} ${s}`);
-const err = (s: string) => console.error(`${kleur.red("✗")} ${s}`);
+const info = (s: string) => console.log(`${kleur.bgBlue().white().bold(" INFO ")} ${s}`);
+const ok = (s: string) => console.log(`${kleur.bgGreen().white().bold(" OK ")} ${s}`);
+const warn = (s: string) => console.log(`${kleur.bgYellow().white().bold(" WARN ")} ${s}`);
+const err = (s: string) => console.error(`${kleur.bgRed().white().bold(" ERROR ")} ${s}`);
+const label = (s: string) => kleur.cyan().bold(s);
+const value = (s: string) => kleur.white(s);
+const cmdStyle = (s: string) => kleur.magenta().bold(s);
+const subtle = (s: string) => kleur.dim(s);
+type ChipTone = "magenta" | "blue" | "green" | "yellow" | "red" | "cyan";
+const chip = (s: string, tone: ChipTone = "magenta") => {
+  const text = ` ${s} `;
+  switch (tone) {
+    case "blue": return kleur.bgBlue().white().bold(text);
+    case "green": return kleur.bgGreen().white().bold(text);
+    case "yellow": return kleur.bgYellow().white().bold(text);
+    case "red": return kleur.bgRed().white().bold(text);
+    case "cyan": return kleur.bgCyan().white().bold(text);
+    default: return kleur.bgMagenta().white().bold(text);
+  }
+};
+const okChip = (s: string) => kleur.bgGreen().white().bold(` ${s} `);
+const errChip = (s: string) => kleur.bgRed().white().bold(` ${s} `);
+const toolChip = (s: string) => kleur.bgBlue().white().bold(` ${s} `);
 const banner = () => (
-  kleur.dim().bold("    ") + kleur.bold("  ▜      \n") +
-  kleur.dim().bold("▛▌▛▌▛▌") + kleur.bold("▛▘▐ ▀▌▌▌▌\n") + 
-  kleur.dim().bold("▙▌▙▌▙▌") + kleur.bold("▙▖▐▖█▌▚▚▘\n") + 
-  kleur.dim().bold("  ▌\n")
+  kleur.magenta("▄▄███▀") + kleur.bold("                    ▀█              \n") +
+  kleur.magenta("▀▀▄▄▄█▄") + kleur.dim().bold("  ▄▀▀▄ ▄▀▀▄ ▄▀▀▄ ") + kleur.bold("▄▀▀▀ █  ▀▀▀▄ █ █ █ \n") +
+  kleur.magenta("  █████") + kleur.dim().bold("  ▀▄▄▀ █▄▄▀ ▀▄▄▀ ") + kleur.bold("▀▄▄▄ █▄ ████ ▀▄▀▄▀\n") +
+  kleur.magenta("   ▀▀▀ ") + kleur.dim().bold("       █")
 );
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -81,18 +100,17 @@ async function showUsage() {
     cost += s.cost || 0;
   }
 
-  console.log(`\n${kleur.bold("═══ opoclaw usage (last 24h) ═══")}\n`);
+  console.log(`\n${chip("USAGE 24H", "blue")}\n`);
+  console.log(`  ${label("Requests:")}    ${value(String(recent.length))}`);
+  console.log(`  ${label("Input:")}       ${value(`${(input / 1000).toFixed(1)}k tokens`)}`);
+  console.log(`  ${label("Output:")}      ${value(`${(output / 1000).toFixed(1)}k tokens`)}`);
+  console.log(`  ${label("Cache read:")}  ${value(`${(cacheRead / 1000).toFixed(1)}k tokens`)}`);
+  console.log(`  ${label("Cache write:")} ${value(`${(cacheWrite / 1000).toFixed(1)}k tokens`)}`);
+  console.log(`  ${label("Cost:")}        ${kleur.green().bold(`$${cost.toFixed(4)}`)}`);
 
-  console.log(`  Requests:    ${recent.length}`);
-  console.log(`  Input:       ${(input / 1000).toFixed(1)}k tokens`);
-  console.log(`  Output:      ${(output / 1000).toFixed(1)}k tokens`);
-  console.log(`  Cache read:  ${(cacheRead / 1000).toFixed(1)}k tokens`);
-  console.log(`  Cache write: ${(cacheWrite / 1000).toFixed(1)}k tokens`);
-  console.log(`  Cost:        $${cost.toFixed(4)}`);
-
-  console.log(`\n${kleur.bold("─── all-time ───")}\n`);
-  console.log(`  Total cost:  $${data.total.cost.toFixed(4)}`);
-  console.log(`  Total reqs:  ${data.sessions.length}`);
+  console.log(`\n${chip("ALL-TIME", "cyan")}\n`);
+  console.log(`  ${label("Total cost:")}  ${kleur.green().bold(`$${data.total.cost.toFixed(4)}`)}`);
+  console.log(`  ${label("Total reqs:")}  ${value(String(data.sessions.length))}`);
   console.log();
 }
 
@@ -304,12 +322,16 @@ async function gatewayHibernate() {
 }
 
 async function chatTui() {
+  const divider = () => console.log(subtle("─".repeat(72)));
+  const section = (title: string, tone: ChipTone = "magenta") => console.log(`${chip(title, tone)} ${subtle("─".repeat(48))}`);
+
   console.log(banner());
-  console.log(kleur.bold("opoclaw chat"));
-  console.log(kleur.dim("Type /exit to quit.\n"));
+  section("CHAT", "magenta");
+  console.log(subtle(`Type ${cmdStyle("/exit")} to quit.\n`));
 
   const rl = createInterface({ input, output });
   const sessionKey = `cli-${Date.now().toString(36)}`;
+  let turn = 0;
 
   const askYesNo = async (prompt: string, defaultNo = true): Promise<boolean> => {
     const suffix = defaultNo ? " [y/N]: " : " [Y/n]: ";
@@ -320,9 +342,13 @@ async function chatTui() {
 
   try {
     while (true) {
-      const text = (await rl.question(kleur.cyan("you> "))).trim();
+      const text = (await rl.question(`${chip("YOU", "blue")} ${kleur.cyan().bold("> ")}`)).trim();
       if (!text) continue;
       if (text === "/exit" || text === "/quit") break;
+      turn += 1;
+      section(`TURN ${turn}`, "blue");
+      console.log(`${chip("INPUT", "cyan")} ${value(text)}`);
+      divider();
 
       try {
         const result = await runCoreChatTurn(sessionKey, text, {
@@ -335,19 +361,23 @@ async function chatTui() {
                 return "(invalid args)";
               }
             })();
-            return await askYesNo(`Authorize tool ${call.function.name} with args ${preview}?`, true);
+            console.log(`${chip("AUTH", "yellow")} ${value(`Tool: ${call.function.name}`)}`);
+            console.log(`${subtle(preview)}\n`);
+            return await askYesNo(`${kleur.yellow().bold("Approve tool call?")}`, true);
           },
           requestPermission: async (message: string, title?: string) => {
             const header = title?.trim() ? `${title}: ` : "";
-            return await askYesNo(`${header}${message || "Approve request?"}`, true);
+            console.log(`${chip("PERMISSION", "yellow")} ${value(header + (message || "Approve request?"))}`);
+            return await askYesNo(`${kleur.yellow().bold("Approve request?")}`, true);
           },
           askQuestion: async (question: string, options: string[], title?: string) => {
-            if (title?.trim()) console.log(kleur.magenta(title));
-            if (question?.trim()) console.log(question.trim());
+            section("QUESTION", "cyan");
+            if (title?.trim()) console.log(kleur.magenta().bold(title));
+            if (question?.trim()) console.log(value(question.trim()));
             for (let i = 0; i < options.length; i++) {
-              console.log(`${i + 1}. ${options[i]}`);
+              console.log(`${kleur.cyan().bold(`${i + 1}.`)} ${value(options[i]!)}`);
             }
-            const raw = (await rl.question("Select option number (blank to cancel): ")).trim();
+            const raw = (await rl.question(`${subtle("Select option number")} ${kleur.dim("(blank to cancel)")} ${kleur.cyan("> ")}`)).trim();
             if (!raw) return null;
             const idx = Number(raw) - 1;
             if (!Number.isInteger(idx) || idx < 0 || idx >= options.length) {
@@ -358,16 +388,18 @@ async function chatTui() {
           },
           onToolLine: (line: string) => {
             const trimmed = line.trim();
-            if (trimmed) console.log(kleur.dim(`[tool] ${trimmed}`));
+            if (trimmed) console.log(`${toolChip("TOOL")} ${subtle(trimmed)}`);
           },
         });
 
         if (result.reasoningSummary && result.reasoningSummary.trim() && result.reasoningSummary.length < 200) {
-          console.log(kleur.dim(`# ${result.reasoningSummary.trim()}`));
+          console.log(`${chip("THINK", "magenta")} ${subtle(result.reasoningSummary.trim())}`);
         }
-        console.log(kleur.green(`assistant> ${result.text}\n`));
+        console.log(`${okChip("ASSISTANT")}\n${result.text}\n`);
+        divider();
       } catch (e: any) {
-        console.log(kleur.red(`error> ${e?.message || String(e)}\n`));
+        console.log(`${errChip("ERROR")} ${e?.message || String(e)}\n`);
+        divider();
       }
     }
   } finally {
@@ -410,9 +442,10 @@ function installService() {
       mkdirSync(`${OP_DIR}/logs`, { recursive: true });
       writeFileSync(PLIST_PATH_LA, plist);
       exec(`launchctl load ${PLIST_PATH_LA}`);
-      ok(`macOS service installed. Manage with:`);
-      console.log(`  launchctl start/com.oponic.opoclaw`);
-      console.log(`  launchctl stop/com.oponic.opoclaw`);
+      ok(`macOS service installed.`);
+      console.log(`${chip("MANAGE", "green")}`);
+      console.log(`  ${cmdStyle("launchctl start/com.oponic.opoclaw")}`);
+      console.log(`  ${cmdStyle("launchctl stop/com.oponic.opoclaw")}`);
       break;
     }
     case "linux": {
@@ -439,14 +472,16 @@ WantedBy=multi-user.target`;
       exec("sudo systemctl enable opoclaw.service");
       exec("sudo systemctl start opoclaw.service");
       ok("Linux systemd service installed and started");
-      console.log(`  systemctl status opoclaw`);
-      console.log(`  systemctl stop opoclaw`);
+      console.log(`${chip("MANAGE", "green")}`);
+      console.log(`  ${cmdStyle("systemctl status opoclaw")}`);
+      console.log(`  ${cmdStyle("systemctl stop opoclaw")}`);
       break;
     }
     case "windows": {
-      warn("Windows service: create manually with NSSM or sc.exe");
-      console.log(`  nssm install opoclaw "${OPCLAW_BIN}" gateway start`);
-      console.log(`  sc create opoclaw binPath="${OPCLAW_BIN} gateway start"`);
+      warn("Windows service: create manually with NSSM or sc.exe.");
+      console.log(`${chip("WINDOWS SERVICE", "yellow")}`);
+      console.log(`  ${cmdStyle(`nssm install opoclaw "${OPCLAW_BIN}" gateway start`)}`);
+      console.log(`  ${cmdStyle(`sc create opoclaw binPath="${OPCLAW_BIN} gateway start"`)}`);
       break;
     }
   }
@@ -494,8 +529,9 @@ function uninstall() {
   try { unlinkSync(OPCLAW_BIN); } catch {}
   try { unlinkSync(OPCLAW_BIN_WIN); } catch {}
   ok("opoclaw uninstalled.");
-  console.log(`\n  To remove all data, delete: ${OP_DIR}`);
-  console.log(`  (config.toml, workspace, and usage data will be lost)\n`);
+  console.log(`\n${chip("DATA", "red")}`);
+  console.log(`  ${value("To remove all data, delete:")} ${cmdStyle(OP_DIR)}`);
+  console.log(`  ${subtle("(config.toml, workspace, and usage data will be lost)")}\n`);
 }
 
 // ── Install Command (create symlink + service) ─────────────────────────────
@@ -520,11 +556,12 @@ function installCommand() {
   const path = process.env.PATH || "";
   if (!path.includes(BIN_DIR)) {
     warn(`${BIN_DIR} is not in your PATH.`);
+    console.log(`${chip("PATH", "yellow")}`);
     if (getOS() === "windows") {
-      console.log(`  Add ${BIN_DIR} to your PATH environment variable.`);
+      console.log(`  ${value("Add")} ${cmdStyle(BIN_DIR)} ${value("to your PATH environment variable.")}`);
     } else {
-      console.log(`  Add to .zshrc / .bashrc:`);
-      console.log(`  export PATH="${BIN_DIR}:$PATH"`);
+      console.log(`  ${value("Add to .zshrc / .bashrc:")}`);
+      console.log(`  ${cmdStyle(`export PATH="${BIN_DIR}:$PATH"` )}`);
     }
   }
 
@@ -572,8 +609,9 @@ function migrate() {
   unlinkSync(jsonPath);
   ok("config.json backed up → config.json.bak and removed");
 
-  console.log(`\n  Your config is now at: ${tomlPath}`);
-  console.log(`  Old config backed up at: ${backupPath}\n`);
+  console.log(`\n${chip("MIGRATION", "cyan")}`);
+  console.log(`  ${value("Your config is now at:")} ${cmdStyle(tomlPath)}`);
+  console.log(`  ${value("Old config backed up at:")} ${cmdStyle(backupPath)}\n`);
 }
 
 // ── less_verbose_tools → tool_call_summaries migration ────────────────────
@@ -730,7 +768,7 @@ async function main() {
         case "hibernate": await gatewayHibernate(); break;
         case "status":  await gatewayStatus(); break;
         default:
-          console.log("Usage: opoclaw gateway {start|stop|restart|hibernate|status}");
+          console.log(`${label("Usage:")} ${cmdStyle("opoclaw gateway {start|stop|restart|hibernate|status}")}`);
       }
       break;
 
@@ -754,7 +792,7 @@ async function main() {
       const svcCmd = args[1];
       if (svcCmd === "install") installService();
       else if (svcCmd === "remove") uninstallService();
-      else console.log("Usage: opoclaw service {install|remove}");
+      else console.log(`${label("Usage:")} ${cmdStyle("opoclaw service {install|remove}")}`);
       break;
 
     case "migrate":
@@ -772,63 +810,63 @@ async function main() {
     case "v":
       try {
         const tag = exec("git describe --tags --abbrev=0 2>/dev/null", { cwd: OP_DIR });
-        console.log(`opoclaw ${tag}`);
+        console.log(`${chip("VERSION", "green")} ${kleur.bold(`opoclaw ${tag}`)}`);
       } catch {
-        console.log("opoclaw (unknown version — no git tags found)");
+        console.log(`${chip("VERSION", "yellow")} ${subtle("opoclaw (unknown version — no git tags found)")}`);
       }
       break;
 
     case "explainer":
     case "explain":
       console.log(`
-${kleur.bold("How opoclaw works")}
+${chip("EXPLAINER", "blue")}
 
-opoclaw is a Discord bot framework. When someone mentions the bot:
+${value("opoclaw is a Discord bot framework. When someone mentions the bot:")}
 
-1. ${kleur.bold("Message received")} — Discord event triggers the MessageCreate handler.
+${label("1.")} ${kleur.bold("Message received")} — Discord event triggers the MessageCreate handler.
    Only messages that @mention the bot (or reply to it) are processed.
    Own messages are always ignored. Other bots are ignored unless
    channel.discord.allow_bots=true in config.toml.
 
-2. ${kleur.bold("System prompt loaded")} — Three workspace files are read and composed:
+${label("2.")} ${kleur.bold("System prompt loaded")} — Three workspace files are read and composed:
    - SOUL.md — personality, tone, rules, vibe
    - IDENTITY.md — name, appearance, self-description
    - AGENTS.md — operating instructions, memory system, safety rules
    These form the system prompt sent to the LLM.
 
-3. ${kleur.bold("Channel history")} — Last 50 messages in the channel are fetched,
+${label("3.")} ${kleur.bold("Channel history")} — Last 50 messages in the channel are fetched,
    formatted as [name]: content, and sent as conversation context.
 
-4. ${kleur.bold("LLM call")} — The composed prompt + history is sent to the configured
+${label("4.")} ${kleur.bold("LLM call")} — The composed prompt + history is sent to the configured
    provider (OpenRouter, Ollama, or custom endpoint). The model generates
    a response. If reasoning is enabled, the model's thinking tokens are
    captured during streaming.
 
-5. ${kleur.bold("Tools")} — The model can request tool calls (file operations, etc.).
+${label("5.")} ${kleur.bold("Tools")} — The model can request tool calls (file operations, etc.).
    Tools execute in a loop (max 20 iterations) until the model stops
    requesting them or sends a final text response.
 
-6. ${kleur.bold("Response sent")} — The reply is sent back to Discord, split into
+${label("6.")} ${kleur.bold("Response sent")} — The reply is sent back to Discord, split into
    chunks if over 1990 characters.
 
-${kleur.bold("Security profile")}
+${chip("SECURITY", "red")}
 
-- ${kleur.bold("No data exfiltration")} — workspace files (SOUL, IDENTITY, AGENTS,
+- ${label("No data exfiltration")} — workspace files (SOUL, IDENTITY, AGENTS,
   MEMORY) are sent to the LLM provider as part of the prompt. Do not
   put secrets in these files.
-- ${kleur.bold("Token safety")} — Discord token and API keys live in config.toml,
+- ${label("Token safety")} — Discord token and API keys live in config.toml,
   never sent to the LLM or exposed in responses.
-- ${kleur.bold("Tool sandboxing")} — file tools only read from the workspace directory.
+- ${label("Tool sandboxing")} — file tools only read from the workspace directory.
   The send_file tool reads workspace files and attaches them to messages.
-- ${kleur.bold("No system commands")} — the bot cannot run shell commands or access
+- ${label("No system commands")} — the bot cannot run shell commands or access
   your filesystem outside the workspace.
-- ${kleur.bold("Rate limiting")} — max 20 agent iterations per message prevents
+- ${label("Rate limiting")} — max 20 agent iterations per message prevents
   runaway loops.
 
-${kleur.bold("Config")}
-config.toml lives at the project root. Onboard wizard: opoclaw onboard.
-Channels live under [channel.*]. Providers live under [provider.*].
-Toggle: channel.discord.allow_bots, enable_reasoning, reasoning_summary.
+${chip("CONFIG", "cyan")}
+${value("config.toml lives at the project root. Onboard wizard:")} ${cmdStyle("opoclaw onboard")}.
+${value("Channels live under")} ${subtle("[channel.*]")}. ${value("Providers live under")} ${subtle("[provider.*]")}.
+${value("Toggle:")} ${subtle("channel.discord.allow_bots, enable_reasoning, reasoning_summary")}.
 `);
       break;
 
@@ -842,37 +880,40 @@ Toggle: channel.discord.allow_bots, enable_reasoning, reasoning_summary.
     case undefined:
       console.log(`
   ${banner()}
-${kleur.magenta("Lightweight AI agent framework")}
+  
+${chip("HELP", "blue")}
+${kleur.blue().bold("Lightweight AI agent framework")}
 
-${kleur.bold("Commands:")}
-  usage              Show token usage (last 24h) and cost
-  gateway start      Start the bot gateway
-  gateway stop       Stop the gateway
-  gateway restart    Restart the gateway
-  gateway hibernate  Hibernate the gateway (requires approval to wake)
-  gateway status     Check if gateway is running
-  update [unstable]  Pull latest release and restart (use unstable channel)
-  chat               Start interactive terminal chat (Core channel)
-  check-update       Check for available updates
-  install            Install opoclaw command + optional service
-  service install    Install auto-start service (systemd/launchd)
-  service remove     Remove auto-start service
-  uninstall          Remove command, service, and clean up
-  explainer          How opoclaw works
-  migrate            Upgrade config (JSON→TOML, camelCase→snake_case, sections)
-  onboard            Run onboarding wizard
-  version            Print current version (git tag)
-  help               Show this help
+${chip("COMMANDS", "magenta")}
+  ${cmdStyle("usage")}              ${subtle("Show token usage (last 24h) and cost")}
+  ${cmdStyle("gateway start")}      ${subtle("Start the bot gateway")}
+  ${cmdStyle("gateway stop")}       ${subtle("Stop the gateway")}
+  ${cmdStyle("gateway restart")}    ${subtle("Restart the gateway")}
+  ${cmdStyle("gateway hibernate")}  ${subtle("Hibernate the gateway (requires approval to wake)")}
+  ${cmdStyle("gateway status")}     ${subtle("Check if gateway is running")}
+  ${cmdStyle("update [unstable]")}  ${subtle("Pull latest release and restart (use unstable channel)")}
+  ${cmdStyle("chat")}               ${subtle("Start interactive terminal chat (Core channel)")}
+  ${cmdStyle("check-update")}       ${subtle("Check for available updates")}
+  ${cmdStyle("install")}            ${subtle("Install opoclaw command + optional service")}
+  ${cmdStyle("service install")}    ${subtle("Install auto-start service (systemd/launchd)")}
+  ${cmdStyle("service remove")}     ${subtle("Remove auto-start service")}
+  ${cmdStyle("uninstall")}          ${subtle("Remove command, service, and clean up")}
+  ${cmdStyle("explainer")}          ${subtle("How opoclaw works")}
+  ${cmdStyle("migrate")}            ${subtle("Upgrade config (JSON→TOML, camelCase→snake_case, sections)")}
+  ${cmdStyle("onboard")}            ${subtle("Run onboarding wizard")}
+  ${cmdStyle("version")}            ${subtle("Print current version (git tag)")}
+  ${cmdStyle("help")}               ${subtle("Show this help")}
 
-${kleur.bold("Config:")}  ${getConfigPath()}
-${kleur.bold("Workspace:")}  ${WORKSPACE_DIR}
-${kleur.bold("Usage:")}  ${USAGE_FILE}
+${chip("PATHS", "cyan")}
+${label("Config:")}     ${value(getConfigPath())}
+${label("Workspace:")}  ${value(WORKSPACE_DIR)}
+${label("Usage:")}      ${value(USAGE_FILE)}
 `);
       break;
 
     default:
       err(`Unknown command: ${cmd}`);
-      console.log("Run `opoclaw help` for usage.");
+      console.log(`${subtle("Run")} ${cmdStyle("opoclaw help")} ${subtle("for usage.")}`);
       process.exit(1);
   }
 }

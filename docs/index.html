@@ -36,6 +36,7 @@
     }
 
     .cmd-box { display: flex; border: 1px solid #333; background: #1a1a1a; }
+    .banner-box { white-space: pre; }
 
     .cmd {
       flex: 1;
@@ -79,8 +80,14 @@
 </head>
 <body>
 
-  <h1>opoclaw</h1>
-  <p>A fast, sandboxed OpenClaw alternative built on Bun.</p>
+  <div class="cmd-box banner-box">
+    ▄▄███▀                      ▀█              
+    ▀▀▄▄▄█▄  ▄▀▀▄ ▄▀▀▄ ▄▀▀▄ ▄▀▀▀ █  ▀▀▀▄ █ █ █ 
+      █████  ▀▄▄▀ █▄▄▀ ▀▄▄▀ ▀▄▄▄ █▄ ████ ▀▄▀▄▀
+       ▀▀▀        █
+
+    A fast, sandboxed OpenClaw alternative built on Bun.
+  </div>
 
   <h2>Install</h2>
   <select id="osSelect" onchange="updateCmd()">
@@ -139,6 +146,10 @@
   <footer>
     <a href="https://github.com/oponic/opoclaw">github</a> &nbsp;·&nbsp;
     <a href="https://github.com/oponic/opoclaw/releases">releases</a>
+  </footer>
+  
+  <footer>
+    oponic + others, 2026
   </footer>
 
   <script>
