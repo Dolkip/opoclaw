@@ -1,5 +1,5 @@
 import { getTools, getToolsFiltered, handleToolCall } from "./tools";
-import type { ToolDefinition } from "./tools/types.ts";
+import { defineTool, type ToolDefinition } from "./tools/types.ts";
 import { getActiveProvider, getModelId, type OpoclawConfig } from "./config.ts";
 import { recordUsage } from "./usage.ts";
 import { provider } from "./provider/index.ts";
@@ -237,7 +237,12 @@ export class AgentSession {
             "You are operating as a subagent. Complete the delegated request and return only the final result."
         );
         
-        const result = await subagent.evaluate(systemPrompt, config, {}, {tools: []});
+        const result = await subagent.evaluate(systemPrompt, config, {}, {tools: [defineTool(
+            "dummy",
+            "This tool does nothing.", {}, [], {
+                handler: async ()=>{return "Nothing"}
+            }
+        )]});
         return (result.text || "").trim() || "(subagent returned no output)";
     }
 
