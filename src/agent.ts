@@ -223,7 +223,7 @@ export class AgentSession {
         
         const subagent = new AgentSession(subSessionId, true);
 
-        const contextMessages = includeContext ? this.messages.slice(-24) : [];
+        const contextMessages = includeContext ? this.messages.filter(x=>x.role=="user" || x.role=="assistant").slice(-24) : [];
         const contextBlock = includeContext && contextMessages.length > 0
             ? `\n\nParent context:\n${this.serializeMessagesForPrompt(contextMessages)}`
             : "";
