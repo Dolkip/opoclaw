@@ -237,11 +237,7 @@ export class AgentSession {
             "You are operating as a subagent. Complete the delegated request and return only the final result."
         );
         
-        const result = await subagent.evaluate(
-            systemPrompt, config, {}, {
-                tools: getToolsFiltered(config, [], [])
-            }
-        );
+        const result = await subagent.evaluate(systemPrompt, config, {}, {tools: []});
         return (result.text || "").trim() || "(subagent returned no output)";
     }
 
