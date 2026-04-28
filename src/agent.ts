@@ -1,5 +1,5 @@
 import { getTools, getToolsFiltered, handleToolCall } from "./tools";
-import type { ToolSchema } from "./tools/types.ts";
+import type { ToolDefinition } from "./tools/types.ts";
 import { getActiveProvider, getModelId, type OpoclawConfig } from "./config.ts";
 import { recordUsage } from "./usage.ts";
 import { provider } from "./provider/index.ts";
@@ -325,7 +325,7 @@ export class AgentSession {
         systemPrompt: string,
         config: OpoclawConfig,
         callbacks: AgentCallbacks,
-        options?: { maxIterations?: number; tools?: ToolSchema[] }
+        options?: { maxIterations?: number; tools?: ToolDefinition[] }
     ): Promise<{ text: string; reasoningSummary?: string; ranTools?: boolean }> {
         this.currentSystemPrompt = systemPrompt;
         const systemMessage: Message = { role: "system", content: systemPrompt };

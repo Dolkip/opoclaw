@@ -6,7 +6,7 @@ import { AGENT_TOOLS } from "./agent-tools.ts";
 import { INFO_TOOLS } from "./info-tools.ts";
 import { DISCORD_TOOLS } from "./discord-tools.ts";
 import { SHELL_TOOLS } from "./shell-tool.ts";
-import type { ToolArgs, ToolContext, ToolSchema, ToolDefinition } from "./types.ts";
+import type { ToolArgs, ToolContext, ToolDefinition } from "./types.ts";
 import type { OpoclawConfig } from "../config.ts";
 
 export type { ToolContext, ToolSchema } from "./types.ts";
@@ -34,17 +34,17 @@ export function requiresToolApproval(name: string): boolean {
     return APPROVAL_TOOL_NAMES.has(name as ToolName);
 }
 
-export function getTools(config: OpoclawConfig): ToolSchema[] {
+export function getTools(config: OpoclawConfig): ToolDefinition[] {
     return (Object.entries(TOOL_DEFINITIONS) as [ToolName, ToolDefinition][])
         .filter(([, definition]) => definition.enabled?.(config) ?? true)
-        .map(([, definition]) => definition.tool);
+        .map(([, definition]) => definition);
 }
 
-export function getToolsFiltered(config: OpoclawConfig, exclude: ToolName[], include?: ToolName[]): ToolSchema[] {
+export function getToolsFiltered(config: OpoclawConfig, exclude: ToolName[], include?: ToolName[]): ToolDefinition[] {
     return getTools(config).filter(tool=>{
-        if(exclude.includes(tool.function.name as ToolName)) return false;
+        if(exclude.includes(tool.schema.function.name as ToolName)) return false;
         if(include == undefined) return true;
-        return include.includes(tool.function.name as ToolName);
+        return include.includes(tool.schema.function.name as ToolName);
     })
 }
 
