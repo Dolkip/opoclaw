@@ -40,7 +40,7 @@ export const AGENT_TOOLS = {
     ),
     run_subagent: defineTool(
         "run_subagent",
-        "Run a subagent instance with a request and return its final response. Note: Subagents cannot call tools.",
+        "Run a subagent instance with a request and return its final response.",
         {
             request: {
                 type: "string",
@@ -62,7 +62,7 @@ export const AGENT_TOOLS = {
     ),
     run_background_subagent: defineTool(
         "run_background_subagent",
-        "Run a subagent in the background and continue immediately. Result is injected later as a follow-up request to the agent. Note: Subagents cannot call tools.",
+        "Run a subagent in the background and continue immediately. Result is injected later as a follow-up request to the agent.",
         {
             request: {
                 type: "string",

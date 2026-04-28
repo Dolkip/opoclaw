@@ -1,5 +1,5 @@
-import { getTools, handleToolCall, type ToolContext } from "./tools/index.ts";
-import type { ToolSchema } from "./tools/types.ts";
+import { getTools, getToolsFiltered, handleToolCall } from "./tools";
+import { defineTool, type ToolDefinition } from "./tools/types.ts";
 import { getActiveProvider, getModelId, type OpoclawConfig } from "./config.ts";
 import { recordUsage } from "./usage.ts";
 import { provider } from "./provider/index.ts";
@@ -94,7 +94,7 @@ export async function runDeepResearch(
         "Synthesize 2-4 concise markdown documents. Output JSON: {\"docs\":[{\"title\":\"...\",\"content\":\"...\"}]} " +
         "Only output JSON, no markdown fences.";
 
-    const session = new AgentSession(sessionId);
+    const session = new AgentSession(sessionId, true);
     session.addMessage({ role: "user", content: query });
 
     let searchBatch: ToolResult[] = [];
@@ -118,7 +118,7 @@ export async function runDeepResearch(
         },
     }, {
         maxIterations: 200,
-        tools: getTools(config).filter(t => ["search", "web_fetch", "get_time"].includes(t.function.name)),
+        tools: getToolsFiltered(config, [], ["search", "web_fetch", "get_time"])
     });
 
     const docs = parseDeepResearchDocs(result.text || "");
@@ -130,10 +130,10 @@ export async function runDeepResearch(
     return `Deep Research Docs:\n\n${compiled}`;
 }
 
-export interface AgentCallbacks {
-    onFirstToken: () => void,
-    onToolCall: (call: ToolCall, uniqueId: string) => void,
-    onToolCallError: (uniqueId: string, error: Error) => void,
+interface AgentCallbacks {
+    onFirstToken?: () => void,
+    onToolCall?: (call: ToolCall, uniqueId: string) => void,
+    onToolCallError?: (uniqueId: string, error: Error) => void,
     requestToolApproval?: (call: ToolCall, uniqueId: string) => Promise<{ approved: boolean; message?: string }>,
     onToolBatch?: (calls: ToolCall[], results: ToolResult[], sessionId: string) => Promise<void>,
     onDeepResearchSummary?: (summary: string) => Promise<void>,
@@ -154,11 +154,13 @@ export class AgentSession {
     messages: Message[];
     currentSystemPrompt: string = "";
     pendingFileSend: { path: string; caption: string } | null = null;
+    isSubagent: boolean = false;
     private backgroundJobs = new Map<string, BackgroundSubagentJob>();
 
-    constructor(sessionId: string) {
+    constructor(sessionId: string, isSubagent?: boolean) {
         this.sessionId = sessionId;
         this.messages = [];
+        if(isSubagent) {this.isSubagent = true;}
     }
 
 
@@ -217,32 +219,30 @@ export class AgentSession {
         parentSystemPrompt: string,
         config: OpoclawConfig,
     ): Promise<string> {
-        const contextMessages = includeContext ? this.messages.slice(-24) : [];
+        const subSessionId = `${this.sessionId}-subagent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        
+        const subagent = new AgentSession(subSessionId, true);
+
+        const contextMessages = includeContext ? this.messages.filter(x=>x.role=="user" || x.role=="assistant").slice(-24) : [];
         const contextBlock = includeContext && contextMessages.length > 0
             ? `\n\nParent context:\n${this.serializeMessagesForPrompt(contextMessages)}`
             : "";
+        subagent.addMessage({
+            role: "user",
+            content: `Delegated request:\n${request}${contextBlock}`
+        });
 
-        const subagentMessages: Message[] = [
-            {
-                role: "system",
-                content:
-                    `${parentSystemPrompt}\n\n` +
-                    "You are operating as a subagent. Complete the delegated request and return only the final result.",
-            },
-            {
-                role: "user",
-                content: `Delegated request:\n${request}${contextBlock}`,
-            },
-        ];
-
-        const subSessionId = `${this.sessionId}-subagent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const result = await provider.generateCompletion(subagentMessages, config, () => {}, [], subSessionId);
-        if (result.usage) {
-            await recordUsage(result.usage, getModelId(config));
-        }
-        if (result.toolCalls.length > 0) {
-            return "Subagent returned tool calls, but tool execution is disabled for subagents.";
-        }
+        const systemPrompt = (
+            `${parentSystemPrompt}\n\n` +
+            "You are operating as a subagent. Complete the delegated request and return only the final result."
+        );
+        
+        const result = await subagent.evaluate(systemPrompt, config, {}, {tools: [defineTool(
+            "dummy",
+            "This tool does nothing.", {}, [], {
+                handler: async ()=>{return "Nothing"}
+            }
+        )]});
         return (result.text || "").trim() || "(subagent returned no output)";
     }
 
@@ -330,7 +330,7 @@ export class AgentSession {
         systemPrompt: string,
         config: OpoclawConfig,
         callbacks: AgentCallbacks,
-        options?: { maxIterations?: number; tools?: ToolSchema[] }
+        options?: { maxIterations?: number; tools?: ToolDefinition[] }
     ): Promise<{ text: string; reasoningSummary?: string; ranTools?: boolean }> {
         this.currentSystemPrompt = systemPrompt;
         const systemMessage: Message = { role: "system", content: systemPrompt };
@@ -339,7 +339,9 @@ export class AgentSession {
         const wrappedOnFirstToken = () => {
             if (!firstTokenFired) {
                 firstTokenFired = true;
-                callbacks.onFirstToken();
+                if(callbacks.onFirstToken) {
+                    callbacks.onFirstToken();
+                }
             }
         };
 
@@ -354,7 +356,7 @@ export class AgentSession {
                 [systemMessage, ...this.messages],
                 config,
                 wrappedOnFirstToken,
-                options?.tools,
+                options?.tools ?? getTools(config),
                 this.sessionId
             );
             const { text, toolCalls, usage, reasoning_details } = result;

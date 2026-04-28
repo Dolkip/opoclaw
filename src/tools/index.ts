@@ -6,10 +6,10 @@ import { AGENT_TOOLS } from "./agent-tools.ts";
 import { INFO_TOOLS } from "./info-tools.ts";
 import { DISCORD_TOOLS } from "./discord-tools.ts";
 import { SHELL_TOOLS } from "./shell-tool.ts";
-import type { ToolArgs, ToolContext, ToolSchema, ToolDefinition } from "./types.ts";
+import type { ToolArgs, ToolContext, ToolDefinition } from "./types.ts";
 import type { OpoclawConfig } from "../config.ts";
 
-export type { ToolContext } from "./types.ts";
+export type { ToolContext, ToolSchema } from "./types.ts";
 
 const TOOL_DEFINITIONS = {
     ...FILE_TOOLS,
@@ -24,10 +24,6 @@ const TOOL_DEFINITIONS = {
 
 export type ToolName = keyof typeof TOOL_DEFINITIONS;
 
-export const TOOLS = Object.fromEntries(
-    Object.entries(TOOL_DEFINITIONS).map(([name, definition]) => [name, definition.tool]),
-) as Record<ToolName, ToolSchema>;
-
 export const APPROVAL_TOOL_NAMES = new Set<ToolName>(
     (Object.entries(TOOL_DEFINITIONS) as [ToolName, ToolDefinition][])
         .filter(([, definition]) => definition.requiresApproval)
@@ -38,14 +34,18 @@ export function requiresToolApproval(name: string): boolean {
     return APPROVAL_TOOL_NAMES.has(name as ToolName);
 }
 
-export function getTools(config: OpoclawConfig): ToolSchema[] {
+export function getTools(config: OpoclawConfig): ToolDefinition[] {
     return (Object.entries(TOOL_DEFINITIONS) as [ToolName, ToolDefinition][])
         .filter(([, definition]) => definition.enabled?.(config) ?? true)
-        .map(([, definition]) => definition.tool);
+        .map(([, definition]) => definition);
 }
 
-export function getToolDefinition(name: string): ToolDefinition | undefined {
-    return TOOL_DEFINITIONS[name as ToolName];
+export function getToolsFiltered(config: OpoclawConfig, exclude: ToolName[], include?: ToolName[]): ToolDefinition[] {
+    return getTools(config).filter(tool=>{
+        if(exclude.includes(tool.schema.function.name as ToolName)) return false;
+        if(include == undefined) return true;
+        return include.includes(tool.schema.function.name as ToolName);
+    })
 }
 
 export async function handleToolCall(
@@ -54,7 +54,7 @@ export async function handleToolCall(
     context: ToolContext,
 ): Promise<string> {
     console.log(`Handling tool call: ${name} with args ${JSON.stringify(args)}`);
-    const definition = getToolDefinition(name);
+    const definition = TOOL_DEFINITIONS[name as ToolName];
     if (!definition) {
         throw new Error(`Unknown tool: ${name}`);
     }

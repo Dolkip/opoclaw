@@ -26,7 +26,7 @@ export type ToolContext = {
 export type ToolHandler = (args: ToolArgs, context: ToolContext) => Promise<string>;
 
 export type ToolDefinition = {
-    tool: ToolSchema;
+    schema: ToolSchema;
     enabled?: (config: OpoclawConfig) => boolean;
     requiresApproval?: boolean;
     handler?: ToolHandler;
@@ -37,11 +37,11 @@ export function defineTool(
     description: string,
     properties: Record<string, any>,
     required: string[],
-    options: Omit<ToolDefinition, "tool"> = {},
+    options: Omit<ToolDefinition, "schema"> = {},
 ): ToolDefinition {
     return {
         ...options,
-        tool: {
+        schema: {
             type: "function",
             function: {
                 name,
