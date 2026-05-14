@@ -13,6 +13,7 @@ cache/
 logs/
 .claude/
 .vscode/
-.codex
+.codex/
 opentui/
 eslint.config.mjs
+dist/
