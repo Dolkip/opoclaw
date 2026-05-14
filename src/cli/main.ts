@@ -9,7 +9,14 @@ import { showExplainer, showHelp } from "./help.ts";
 import kleur from "kleur";
 
 export async function main() {
-  const args = process.argv.slice(2);
+  const rawArgs = process.argv.slice(2);
+  const args = [...rawArgs];
+
+  // Bun wrappers can forward argv as: ["run", "<script>", ...actualArgs].
+  // Normalize so command dispatch always reads the user command first.
+  if (args[0] === "run") args.shift();
+  if (args[0]?.endsWith("/cli.ts") || args[0]?.endsWith("\\cli.ts") || args[0] === "cli.ts") args.shift();
+
   const cmd = args[0];
 
   switch (cmd) {
