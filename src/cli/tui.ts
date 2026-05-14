@@ -4,7 +4,7 @@ import { Box, Text, createCliRenderer } from "@opentui/core";
 import type { ToolCall } from "../agent.ts";
 import { runCoreChatTurn } from "../channels/core.ts";
 
-export async function chatTui() {
+export async function tui() {
   const renderer = await createCliRenderer({
     exitOnCtrlC: true,
     screenMode: "split-footer",
