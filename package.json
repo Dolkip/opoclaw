@@ -5,14 +5,17 @@
   "private": true,
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/node": "^25.7.0"
+    "@types/node": "^25.7.0",
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.3.0",
+    "typescript-eslint": "^8.59.3"
   },
   "peerDependencies": {
     "typescript": "^6.0.3"
   },
   "dependencies": {
     "@iarna/toml": "^3.0.0",
-    "@opentui/core": "^0.2.9",
+    "@opentui/core": "^0.2.10",
     "discord.js": "^14.26.4",
     "kleur": "^4.1.5",
     "ollama": "^0.6.3",

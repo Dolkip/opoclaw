@@ -155,7 +155,7 @@ export async function formatDiscordMessage(client: Client, m: Message, imageAtta
             const mentions = Array.from(ref_m.mentions.users.values());
             if(mentions.length > 0) {
                 message_formatted += "Mentions:\n";
-                for(let mention of mentions) {
+                for(const mention of mentions) {
                     message_formatted += ` - ${formatAuthor(client, mention)}\n`;
                 }
             }
@@ -171,7 +171,7 @@ export async function formatDiscordMessage(client: Client, m: Message, imageAtta
     const mentions = Array.from(m.mentions.users.values());
     if(mentions.length > 0) {
         message_formatted += "Mentions:\n";
-        for(let mention of mentions) {
+        for(const mention of mentions) {
             message_formatted += ` - ${formatAuthor(client, mention)}\n`;
         }
     }
