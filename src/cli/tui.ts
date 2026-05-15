@@ -3,7 +3,6 @@ import { runCoreChatTurn } from "../channels/core.ts"
 
 export async function tui() {
   const { createCliRenderer, Text, Box, RGBA, TextareaRenderable, ScrollBoxRenderable, TextRenderable } = await import("@opentui/core")
-
   const renderer = await createCliRenderer({
     exitOnCtrlC: false,
   })
@@ -57,7 +56,6 @@ export async function tui() {
 
   const promptBox = new TextareaRenderable(renderer, {
     marginTop: "auto",
-    id: "prompt",
     width: "100%",
     height: 3,
     placeholder: "Send a message... (Shift+Enter for newline, /exit to quit)",
