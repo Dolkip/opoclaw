@@ -1,6 +1,6 @@
 import { doUpdate, checkForUpdate, exec } from "../utils.ts";
 import { OP_DIR, chip, cmdStyle, err, label, subtle } from "./shared.ts";
-import { tui } from "./tui.ts";
+// Lazy-load the TUI to avoid bundling heavy `@opentui/core` assets unless needed
 import { showUsage } from "./usage.ts";
 import { gatewayStart, gatewayStop, gatewayRestart, gatewayHibernate, gatewayStatus } from "./gateway.ts";
 import { installCommand, installService, uninstall, uninstallService } from "./service.ts";
@@ -82,7 +82,10 @@ export async function main() {
       break;
 
     case "tui":
-      await tui();
+      {
+        const mod = await import("./tui.ts")
+        await mod.tui()
+      }
       break;
 
     case "help":
