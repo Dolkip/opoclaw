@@ -5,7 +5,7 @@
  */
 
 import { resolve } from "path";
-import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync } from "fs";
 import { createInterface } from "readline";
 import TOML from "@iarna/toml";
 import kleur from "kleur";
@@ -38,6 +38,7 @@ const header = (msg: string) =>
 
 const WORKSPACE_ROOT = resolve(import.meta.dir, "..");
 const WORKSPACE_DIR = resolve(WORKSPACE_ROOT, "workspace");
+const SKILLS_DIR = resolve(WORKSPACE_DIR, "skills");
 const CONFIG_FILE = resolve(WORKSPACE_ROOT, "config.toml");
 
 // ── Workspace templates ────────────────────────────────────────────────────
@@ -145,6 +146,27 @@ const DEFAULT_HEARTBEAT_TOML = `# <filename> - things to check periodically
 # Automatically you'll be prompted with these during "heartbeats". Add things here that you want to check on regularly.
 tasks = []
 `;
+
+const SKILL_CREATION = `# SKILL_CREATION.MD
+
+## This is an opoclaw agent skill.
+
+This skill details how skills should be created and managed.
+Your skills are markdown files with capitalised names that reside in skills/ within your workspace eg: SKILL_CREATION.md (this one!).
+Skills contain valuable information which you can read and use for complicated tasks.
+When faced with a complicated task, think "Is there a skill for that?". Skills are *your best friend* for such tasks because they should explain everything you need to do.
+When a complicated task has been finished for the first time, reflect on everything you did to finish it and create a skill to use in the future.
+Do not assume the skill's reader (future you) knows everything you need to achieve it, write down everything that you need to achieve the complicated task.
+
+Writing tips
+
+- Keep instructions short and descriptive.
+- Prefer numbered steps and concrete examples.
+- Be explicit about edge cases and safety constraints.
+- One skill, one responsibility: split large behaviors into multiple small skills.
+
+Skills should be treated as mutable. Whenever you find more efficient ways to do things update its skill.
+`
 
 // ── Main ───────────────────────────────────────────────────────────────────
 
@@ -287,7 +309,7 @@ async function main() {
         ...(useTavily && tavilyApiKey ? { search_provider: "tavily" as const, tavily_api_key: tavilyApiKey } : {}),
     };
 
-    writeFileSync(CONFIG_FILE, TOML.stringify(config as TOML.JsonMap));
+    await Bun.write(CONFIG_FILE, TOML.stringify(config as TOML.JsonMap));
     ok(`Config written to ${CONFIG_FILE}`);
 
     // ── Generate workspace ─────────────────────────────────────────────────
@@ -322,10 +344,24 @@ async function main() {
         if (existsSync(path)) {
             info(`Skipped ${name} (already exists)`);
         } else {
-            writeFileSync(path, getFileContent(name, content));
+            await Bun.write(path, getFileContent(name, content));
             ok(`Created ${name}`);
         }
     }
+
+    if (!existsSync(SKILLS_DIR)) {
+        mkdirSync(SKILLS_DIR, { recursive: true });
+    }
+
+    // Create a starter skill file if missing
+    const skillCreationPath = resolve(SKILLS_DIR, "SKILL_CREATION.md");
+    if (!(await Bun.file(skillCreationPath).exists())) {
+        await Bun.write(skillCreationPath, SKILL_CREATION);
+        ok(`Created example skill in ${SKILLS_DIR}`);
+    } else {
+        info("example skill already exists, skipping");
+    }
+    
 
     // ── Done ───────────────────────────────────────────────────────────────
 

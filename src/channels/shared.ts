@@ -81,7 +81,7 @@ export async function buildSystemPrompt(config: OpoclawConfig, extraSections: st
     }
     if (skills.length > 0) {
         parts.push(
-            `\n## Skills\nAvailable skills: ${skills.map((s) => `\`${s}\``).join(", ")}\nTo use a skill, call the use_skill tool with the skill name. It will return the skill's SKILL.md instructions before you apply them.`,
+            `\n## Skills\nAvailable skills: ${skills.map((s) => `\`${s}\``).join(", ")}\nTo use a skill, call the use_skill tool with the skill path. It will return the <skill>.md file for you to apply.`,
         );
     }
     if (useToml) {

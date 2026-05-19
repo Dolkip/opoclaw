@@ -20,7 +20,7 @@ describe("workspace", () => {
     await setup();
     const rel = "__test__/a.txt";
     expect(await readFile(rel)).toBe("alpha");
-    await editFile(rel, "beta");
+    await editFile(rel, "alpha", "beta");
     expect(await readFile(rel)).toBe("beta");
     await cleanup();
   });

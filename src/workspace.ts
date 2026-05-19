@@ -60,15 +60,36 @@ export function getFilePath(relativePath: string, mounts?: Record<string, string
 
 export async function editFile(
   relativePath: string,
-  newContent: string,
+  oldString: string,
+  newString: string,
   mounts?: Record<string, string>
 ): Promise<void> {
   const abs = safePath(relativePath, mounts);
   if (!existsSync(abs)) {
     throw new Error(
-      `Cannot edit "${relativePath}": file does not exist. Creating new files is not allowed.`
+      `Cannot edit: "${relativePath}" does not exist.`
     );
   }
+  const content = await Bun.file(abs).text();
+  if (oldString.length === 0) {
+    throw new Error("Cannot edit: oldString is empty, so nothing can be replaced.");
+  }
+
+  const index = content.indexOf(oldString);
+  if (index === -1) {
+    throw new Error(`Cannot edit: oldString (${oldString}) not found in "${relativePath}"`);
+  }
+
+  const updated = content.slice(0, index) + newString + content.slice(index + oldString.length);
+  await Bun.write(abs, updated);
+};
+
+export async function writeFile(
+  relativePath: string,
+  newContent: string,
+  mounts?: Record<string, string>
+): Promise<void> {
+  const abs = safePath(relativePath, mounts);
   await Bun.write(abs, newContent);
 }
 

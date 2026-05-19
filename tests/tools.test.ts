@@ -26,7 +26,7 @@ describe("tools", () => {
     const rel = "__tools_test__/a.txt";
     const content = await handleToolCall("read_file", { path: rel }, DUMMY_TOOL_CONTEXT);
     expect(content).toBe("alpha");
-    await handleToolCall("edit_file", { path: rel, content: "beta" }, DUMMY_TOOL_CONTEXT);
+    await handleToolCall("edit_file", { path: rel, oldString: "alpha", newString: "beta" }, DUMMY_TOOL_CONTEXT);
     const updated = await readFile(resolve(TEST_DIR, "a.txt"), "utf-8");
     expect(updated).toBe("beta");
     await cleanup();
@@ -67,11 +67,11 @@ describe("tools", () => {
   });
 
   test("use_skill and list_skills", async () => {
-    const skillsDir = resolve(WORKSPACE_DIR, "skills", "alpha");
+    const skillsDir = resolve(WORKSPACE_DIR, "skills");
     await mkdir(skillsDir, { recursive: true });
-    await writeFile(resolve(skillsDir, "SKILL.md"), "Alpha skill", "utf-8");
+    await writeFile(resolve(skillsDir, "ALPHA.md"), "Alpha skill", "utf-8");
     const list = await handleToolCall("list_skills", {}, DUMMY_TOOL_CONTEXT);
-    expect(list).toContain("alpha");
+    expect(list).toContain("ALPHA");
     const skill = await handleToolCall("use_skill", { name: "alpha" }, DUMMY_TOOL_CONTEXT);
     expect(skill).toContain("Alpha skill");
     await rm(resolve(WORKSPACE_DIR, "skills"), { recursive: true, force: true });

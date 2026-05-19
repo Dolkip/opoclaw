@@ -1,15 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { mkdir, rm, writeFile } from "fs/promises";
 import { resolve } from "path";
-import { listSkills, readSkill } from "../src/skills.ts";
+import { listSkills, useSkill } from "../src/skills.ts";
 import { WORKSPACE_DIR } from "../src/workspace.ts";
 
 const SKILLS_DIR = resolve(WORKSPACE_DIR, "skills");
 
 async function setupSkill(name: string, content: string) {
-  const dir = resolve(SKILLS_DIR, name);
-  await mkdir(dir, { recursive: true });
-  await writeFile(resolve(dir, "SKILL.md"), content, "utf-8");
+  await mkdir(SKILLS_DIR, { recursive: true });
+  await writeFile(resolve(SKILLS_DIR, `${name}.md`), content, "utf-8");
 }
 
 async function cleanupSkills() {
@@ -33,13 +32,13 @@ describe("skills", () => {
     await cleanupSkills();
     await setupSkill("gamma", "Gamma skill content");
 
-    const content = await readSkill("gamma");
+    const content = await useSkill("gamma");
     expect(content).toContain("Gamma skill content");
 
     await cleanupSkills();
   });
 
   test("readSkill rejects invalid name", async () => {
-    await expect(readSkill("../bad" as any)).rejects.toThrow();
+    await expect(useSkill("../bad")).rejects.toThrow();
   });
 });

@@ -1,7 +1,6 @@
 import { resolve, relative, join } from "path";
 import { WORKSPACE_DIR } from "./workspace.ts";
-import { existsSync } from "fs";
-import { readdir, stat, readFile } from "fs/promises";
+import { existsSync, readdirSync } from "fs";
 
 const SKILLS_DIR = resolve(WORKSPACE_DIR, "skills");
 
@@ -13,7 +12,11 @@ function getSkillFilePath(name: string): string {
     if (!isSafeSkillName(name)) {
         throw new Error("Invalid skill name.");
     }
-    const abs = resolve(join(SKILLS_DIR, name, "SKILL.md"));
+    const filename = name.toLowerCase().endsWith(".md") ? name : `${name}.md`;
+    if (filename.includes("/") || filename.includes("\\")) {
+        throw new Error("Invalid skill path.");
+    }
+    const abs = resolve(join(SKILLS_DIR, filename));
     const rel = relative(SKILLS_DIR, abs);
     if (rel.startsWith("..") || rel.includes("/../")) {
         throw new Error("Invalid skill path.");
@@ -22,24 +25,30 @@ function getSkillFilePath(name: string): string {
 }
 
 export async function listSkills(): Promise<string[]> {
-    if (!existsSync(SKILLS_DIR)) return [];
-    const entries = await readdir(SKILLS_DIR, { withFileTypes: true });
     const skills: string[] = [];
+
+    if (!existsSync(SKILLS_DIR)) return [];
+
+    const entries = readdirSync(SKILLS_DIR, { withFileTypes: true });
     for (const e of entries) {
-        if (!e.isDirectory()) continue;
-        const name = e.name;
+        if (!e.isFile()) continue;
+        const fileName = e.name;
+        if (!fileName.toLowerCase().endsWith(".md")) continue;
+        const name = fileName.replace(/\.md$/i, "");
         if (!isSafeSkillName(name)) continue;
-        const skillPath = getSkillFilePath(name);
-        try {
-            const s = await stat(skillPath);
-            if (s.isFile()) skills.push(name);
-        } catch {
-        }
+        skills.push(name);
     }
+
     return skills.sort();
 }
 
 export async function readSkill(name: string): Promise<string> {
     const path = getSkillFilePath(name);
-    return await readFile(path, "utf-8");
+    const file = Bun.file(path);
+    if (!(await file.exists())) {
+        throw new Error("Skill not found.");
+    }
+    return await file.text();
 }
+
+export const useSkill = readSkill;

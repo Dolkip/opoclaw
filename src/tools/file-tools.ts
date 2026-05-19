@@ -1,4 +1,4 @@
-import { readFile, getFilePath, editFile, listFiles } from "../workspace.ts";
+import { readFile, getFilePath, writeFile, editFile, listFiles } from "../workspace.ts";
 import { defineTool, type ToolDefinition } from "./types.ts";
 
 export const FILE_TOOLS = {
@@ -20,9 +20,9 @@ export const FILE_TOOLS = {
             },
         },
     ),
-    edit_file: defineTool(
-        "edit_file",
-        "Overwrite the contents of an existing file in the workspace. You cannot create new files or delete files - only edit files that already exist.",
+    write_file: defineTool(
+        "write_file",
+        "Overwrite the contents of an existing file in the workspace. If it does not exist, it will be created.",
         {
             path: {
                 type: "string",
@@ -37,10 +37,39 @@ export const FILE_TOOLS = {
         {
             enabled: (config) => config.basic_tools ?? true,
             handler: async (args, { config }) => {
-                if (!args.path) throw new Error("Missing 'path' argument for edit_file.");
-                if (args.content === undefined) throw new Error("Missing 'content' argument for edit_file.");
-                await editFile(String(args.path), String(args.content), config.mounts);
+                if (!args.path) throw new Error("Missing 'path' argument for write_file.");
+                if (args.content === undefined) throw new Error("Missing 'content' argument for write_file.");
+                await writeFile(String(args.path), String(args.content), config.mounts);
                 return `Successfully wrote ${String(args.content).length} characters to "${args.path}".`;
+            },
+        },
+    ),
+    edit_file: defineTool(
+        "edit_file",
+        "Use the Semicorp file editor to replace a string in a file with a new string.",
+        {
+            path: {
+                type: "string",
+                description: "Relative path to the file within the workspace.",
+            },
+            oldString: {
+                type: "string",
+                description: "The string within the file to be replaced. Must match perfectly.",
+            },
+            newString: {
+                type: "string",
+                description: "The string to replace oldString with.",
+            },
+        },
+        ["path", "oldString", "newString"],
+        {
+            enabled: (config) => config.basic_tools ?? true,
+            handler: async (args, { config }) => {
+                if (!args.path) throw new Error("Missing 'path' argument for edit_file.");
+                if (args.oldString === undefined) throw new Error("Missing 'oldString' argument for edit_file.");
+                if (args.newString === undefined) throw new Error("Missing 'newString' argument for edit_file.");
+                await editFile(String(args.path), String(args.oldString), String(args.newString), config.mounts);
+                return `Successfully replaced ${args.oldString} with ${args.newString} in "${args.path}". Semicorp File Editor, 1995.`;
             },
         },
     ),
