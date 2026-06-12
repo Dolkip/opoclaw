@@ -3,6 +3,20 @@ import { getApiBaseUrl, getApiKey, getActiveProvider, getModelId, type OpoclawCo
 import { type ToolSchema } from "../tools/index.ts";
 import type { Message, ToolCall, CompletionResult } from "./types.ts";
 
+export function buildClientOptions(config: OpoclawConfig) {
+    const options: Record<string, any> = {
+        apiKey: getApiKey(config) || "ollama",
+        baseURL: `${getApiBaseUrl(config)}/v1`,
+    };
+    if (getActiveProvider(config) === "openrouter") {
+        options.defaultHeaders = {
+            "HTTP-Referer": "https://github.com/oponic/opoclaw",
+            "X-Title": "opoclaw",
+        };
+    }
+    return options;
+}
+
 export async function generateCompletion(
     messages: Message[],
     config: OpoclawConfig,
@@ -10,10 +24,7 @@ export async function generateCompletion(
     tools: ToolSchema[],
     sessionId: string,
 ): Promise<CompletionResult> {
-    const client = new OpenAI({
-        apiKey: getApiKey(config) || "ollama",
-        baseURL: `${getApiBaseUrl(config)}/v1`,
-    });
+    const client = new OpenAI(buildClientOptions(config));
 
     const requestParams: any = {
         model: getModelId(config),

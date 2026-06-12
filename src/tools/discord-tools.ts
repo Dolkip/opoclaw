@@ -129,5 +129,27 @@ export const DISCORD_TOOLS = {
         {
             handler: discordOnlyHandler("check_polls"),
         }
-    )
+    ),
+    create_thread: defineTool(
+        "create_thread",
+        "Create a Discord thread in the current channel. Optionally branch it off a specific message and/or post an initial message into the new thread.",
+        {
+            name: {
+                type: "string",
+                description: "Name for the thread (1-100 characters).",
+            },
+            message_id: {
+                type: "string",
+                description: "Optional message ID in the current channel to start the thread from.",
+            },
+            initial_message: {
+                type: "string",
+                description: "Optional message to post into the newly created thread.",
+            },
+        },
+        ["name"],
+        {
+            handler: discordOnlyHandler("create_thread"),
+        },
+    ),
 } satisfies Record<string, ToolDefinition>;

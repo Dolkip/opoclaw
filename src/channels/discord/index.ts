@@ -59,6 +59,26 @@ const APPROVAL_TIMEOUT_MS = 60_000;
 
 const channelSessions = new Map<string, AgentSession>();
 
+// Tracks the last channel the bot actively responded in, so out-of-band
+// senders (e.g. the heartbeat agent) can reach the most recent conversation.
+let lastActiveChannel: TextChannel | null = null;
+
+export function getLastDiscordChannelId(): string | null {
+    return lastActiveChannel?.id ?? null;
+}
+
+export async function sendToLastDiscordChannel(content: string): Promise<boolean> {
+    if (!lastActiveChannel) return false;
+    try {
+        for (const chunk of splitMessage(content)) {
+            if (chunk) await lastActiveChannel.send(chunk);
+        }
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 async function removeReaction(client: Client, msg: Message, emoji: string): Promise<void> {
     try {
         const reaction = msg.reactions.cache.get(emoji);
@@ -356,6 +376,10 @@ async function onMessage(client: Client, msg: Message) {
 
     await addReaction(msg, EYES);
 
+    if ("send" in msg.channel) {
+        lastActiveChannel = msg.channel as TextChannel;
+    }
+
     const extraSections = [
         `\n## Discord Context\nChannel ID: ${msg.channel.id}\nMessage IDs appear as \`[id:...]\` in history entries. Reactions are shown at the end like \`(reactions: 😄×2)\`. Use the \`react_message\` tool with \`channel_id\` and \`message_id\` to react.\nNever include \`[id:...]\` in your replies; IDs are only for tool calls.`,
     ];
@@ -551,7 +575,35 @@ async function onMessage(client: Client, msg: Message) {
         if(call.function.name === "check_polls") {
             return getPollSummary(msg.channel.id);
         }
-        
+
+        if (call.function.name === "create_thread") {
+            const channel = msg.channel as TextChannel;
+            if (typeof (channel as any).threads?.create !== "function") {
+                return "Error: threads cannot be created in this channel type.";
+            }
+            const name = typeof args.name === "string" ? args.name.trim().slice(0, 100) : "";
+            if (!name) {
+                return "Error: create_thread requires a non-empty 'name'.";
+            }
+            const initialMessage = typeof args.initial_message === "string" ? args.initial_message.trim() : "";
+            try {
+                let thread;
+                const startMessageId = typeof args.message_id === "string" ? args.message_id.trim() : "";
+                if (startMessageId) {
+                    const startMessage = await channel.messages.fetch(startMessageId);
+                    thread = await startMessage.startThread({ name });
+                } else {
+                    thread = await channel.threads.create({ name });
+                }
+                if (initialMessage) {
+                    await thread.send(initialMessage);
+                }
+                return `Thread created: ${thread.name} (id: ${thread.id})`;
+            } catch (e: any) {
+                return `Error creating thread: ${e.message}`;
+            }
+        }
+
         return undefined;
     };
 

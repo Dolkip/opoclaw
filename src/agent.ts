@@ -1,9 +1,16 @@
 import { getTools, getToolsFiltered, handleToolCallDefinition } from "./tools";
-import { defineTool, type ToolDefinition } from "./tools/types.ts";
+import { type ToolDefinition } from "./tools/types.ts";
 import { getActiveProvider, getModelId, type OpoclawConfig } from "./config.ts";
 import { recordUsage } from "./usage.ts";
 import { provider } from "./provider/index.ts";
+import { logInteraction, type InteractionKind } from "./interactions.ts";
 import type { Message, ToolCall } from "./provider/types.ts";
+
+function contentToString(content: any): string {
+    if (typeof content === "string") return content;
+    if (content == null) return "";
+    return JSON.stringify(content);
+}
 
 export type { ToolCall };
 
@@ -172,6 +179,17 @@ export class AgentSession {
         if(isSubagent) {this.isSubagent = true;}
     }
 
+    // Only top-level, user-facing sessions are recorded for the dreamer; internal
+    // sessions (subagents, deep research, the dreamer itself) are skipped.
+    private get loggable(): boolean {
+        return !this.isSubagent && !this.sessionId.includes("dreamer");
+    }
+
+    private logEvent(kind: InteractionKind, content: string, name?: string): void {
+        if (!this.loggable || !content.trim()) return;
+        void logInteraction({ session: this.sessionId, kind, content, name });
+    }
+
 
     registerBackgroundJob(job: BackgroundSubagentJob): void {
         if(this.backgroundJobs.get(job.id)?.status == "running") {
@@ -251,6 +269,12 @@ export class AgentSession {
         while (this.inputQueue.length > 0 && this.inputQueue[0]!.kind === "context") {
             const item = this.inputQueue.shift() as ContextQueueItem;
             this.messages.push(item.msg);
+            // Log incoming user prompts; the bot's own assistant/tool output is
+            // logged at production time inside _evaluate, so skip those here to
+            // avoid duplicating re-injected channel history.
+            if (item.msg.role === "user") {
+                this.logEvent("user", contentToString(item.msg.content));
+            }
             this.trimContextByChars();
             item.resolve();
         }
@@ -298,12 +322,19 @@ export class AgentSession {
             "You are operating as a subagent. Complete the delegated request and return only the final result."
         );
         
-        const result = await subagent.evaluate(systemPrompt, config, {}, {tools: [defineTool(
-            "dummy_tool",
-            "This tool does nothing. As a subagent, you don't get access to any main agent tools.",
-            {}, [],
-            {handler: async ()=>{return ""}}
-        )]});
+        // Subagents get the full tool set, minus the recursive spawn tools (to
+        // prevent infinite subagent recursion) and the interactive Discord-only
+        // tools (which have no UI to render to in a subagent context).
+        const subagentTools = getToolsFiltered(config, [
+            "run_subagent",
+            "run_background_subagent",
+            "request_permission",
+            "question",
+            "poll",
+            "check_polls",
+            "create_thread",
+        ]);
+        const result = await subagent.evaluate(systemPrompt, config, {}, { tools: subagentTools });
         return (result.text || "").trim() || "(subagent returned no output)";
     }
 
@@ -436,6 +467,10 @@ export class AgentSession {
                     tool_calls: toolCalls,
                     ...(reasoning_details ? {reasoning_details} : {})
                 });
+                if (text) this.logEvent("assistant", text);
+                for (const tc of toolCalls) {
+                    this.logEvent("tool_call", tc.function.arguments || "", tc.function.name);
+                }
 
                 const toolResults: ToolResult[] = [];
                 for (const tc of toolCalls) {
@@ -491,6 +526,7 @@ export class AgentSession {
                         name: tc.function.name,
                         content: toolResult,
                     });
+                    this.logEvent("tool_result", toolResult, tc.function.name);
                 }
 
                 if (callbacks.onToolBatch) {
@@ -514,6 +550,7 @@ export class AgentSession {
             }
 
             this.messages.push({ role: "assistant", content: responseText });
+            this.logEvent("assistant", responseText);
 
             this.injectBackgroundResultsIntoContext();
 

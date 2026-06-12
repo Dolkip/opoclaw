@@ -6,6 +6,7 @@ workspace/
 config.json.bak
 config.toml
 usage.json
+data/
 workspace/
 cache/
 .gateway.lock

@@ -82,6 +82,13 @@ export interface OpoclawConfig {
     search_provider?: "duckduckgo" | "tavily";
     tavily_api_key?: string;
     show_update_notification?: boolean;
+    heartbeat?: {
+        enabled?: boolean;
+        interval_minutes?: number;
+    };
+    dreamer?: {
+        enabled?: boolean;
+    };
 }
 
 export function loadConfig(): OpoclawConfig {

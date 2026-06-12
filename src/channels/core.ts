@@ -3,6 +3,8 @@ import { unlinkSync, writeFileSync } from "fs";
 import { startDiscord } from "./discord/index.ts";
 import { startIRC } from "./irc.ts";
 import { startOpenAI } from "./openai.ts";
+import { startHeartbeat } from "./heartbeat.ts";
+import { startDreamer } from "./dreamer.ts";
 import { AgentSession, summarizeToolBatch, type ToolCall } from "../agent.ts";
 import { loadConfig } from "../config.ts";
 import { requiresToolApproval } from "../tools/index.ts";
@@ -250,6 +252,18 @@ export async function startCore() {
     } catch (err: any) {
         console.error(`OpenAI channel failed to start: ${err.message}`);
         throw err;
+    }
+
+    try {
+        startHeartbeat();
+    } catch (err: any) {
+        console.error(`Heartbeat failed to start: ${err.message}`);
+    }
+
+    try {
+        startDreamer();
+    } catch (err: any) {
+        console.error(`Dreamer failed to start: ${err.message}`);
     }
 
     return server;

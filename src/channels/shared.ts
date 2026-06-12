@@ -31,6 +31,8 @@ const CHANNEL_CONTEXT: Record<string, string> = {
     terminal: "You are operating in a terminal (CLI) context.",
     openai: "You are operating via the OpenAI-compatible API.",
     irc: "You are operating in an IRC channel context.",
+    heartbeat: "You are operating as an automated heartbeat agent, invoked on a timer rather than by a user.",
+    dreamer: "You are operating as the dreamer, reflecting over the day's interactions to consolidate long-term memory.",
 };
 
 function renderSystemPrompt(template: string, channel: string): string {
