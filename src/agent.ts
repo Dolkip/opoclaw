@@ -60,9 +60,9 @@ export async function summarizeToolBatch(
         arguments: r.arguments,
         output: r.output.slice(0, 1000),
     }));
-    const prompt = `Write one short, high-level sentence summarizing what was accomplished. It should mention the objective or outcome, not the tools or files used. No markdown, no bullet points.\n\n${JSON.stringify(summaryInput, null, 2)}`;
+    const prompt = `Write one short, high-level sentence (two at most, only if the actions are clearly unrelated) summarizing what was accomplished overall. Mention the objective or outcome, not the individual tools or files used. Be vague rather than exhaustive. No markdown, no bullet points.\n\n${JSON.stringify(summaryInput, null, 2)}`;
 
-    const systemMsg: Message = { role: "system", content: "You summarize actions at a high level without mentioning tools or files. Output exactly one short sentence." };
+    const systemMsg: Message = { role: "system", content: "You summarize a batch of actions at a high level without mentioning tools or files. Output one short sentence, or two at most. Stay concise and vague rather than listing everything." };
     const userMsg: Message = { role: "user", content: prompt };
 
     const result = await provider.generateCompletion([systemMsg, userMsg], config, () => {}, [], sessionId);

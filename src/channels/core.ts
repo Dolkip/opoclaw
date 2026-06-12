@@ -84,11 +84,12 @@ export async function runCoreChatTurn(
         callbacks.onToolLine?.(`Tool error: ${error.message}`);
     };
 
-    const onToolBatch = async (calls: ToolCall[], results: any[], sessionId: string) => {
+    // Accumulate across the whole turn and summarize once at the end, rather
+    // than emitting one summary line per agent iteration.
+    const accumulatedToolResults: any[] = [];
+    const onToolBatch = async (_calls: ToolCall[], results: any[], _sessionId: string) => {
         if (toolCallSummaries !== "minimal") return;
-        const summary = await summarizeToolBatch(calls, results, config, sessionId);
-        const trimmed = summary.trim();
-        if (trimmed && trimmed !== "(no summary)") callbacks.onToolLine?.(trimmed);
+        accumulatedToolResults.push(...results);
     };
 
     const requestToolApproval = async (call: ToolCall, _uniqueId: string) => {
@@ -148,6 +149,12 @@ export async function runCoreChatTurn(
         },
         executeTool,
     });
+
+    if (toolCallSummaries === "minimal" && accumulatedToolResults.length > 0) {
+        const summary = await summarizeToolBatch([], accumulatedToolResults, config, session.sessionId);
+        const trimmed = summary.trim();
+        if (trimmed && trimmed !== "(no summary)") callbacks.onToolLine?.(trimmed);
+    }
 
     return { text: result.text, reasoningSummary: result.reasoningSummary };
 }

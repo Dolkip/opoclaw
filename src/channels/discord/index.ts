@@ -457,17 +457,13 @@ async function onMessage(client: Client, msg: Message) {
         }
     };
 
-    const onToolBatch = async (calls: ToolCall[], results: any[], sessionId: string) => {
+    // In minimal mode we accumulate every tool result across the whole turn and
+    // emit a single high-level summary at the end, rather than one line per
+    // agent iteration (which produced a wall of summaries).
+    const accumulatedToolResults: any[] = [];
+    const onToolBatch = async (_calls: ToolCall[], results: any[], _sessionId: string) => {
         if (toolCallSummaries !== "minimal") return;
-        try {
-            const summary = await summarizeToolBatch(calls, results, config, sessionId);
-            const trimmed = summary.trim();
-            if (trimmed && trimmed !== "(no summary)") {
-                await (msg.channel as TextChannel).send(`-# ${trimmed}`);
-            }
-        } catch (e: any) {
-            await (msg.channel as TextChannel).send(`-# 🛑 Tool summary failed: ${e.message}`);
-        }
+        accumulatedToolResults.push(...results);
     };
 
     const onDeepResearchSummary = async (summary: string) => {
@@ -623,6 +619,18 @@ async function onMessage(client: Client, msg: Message) {
                 executeTool,
             }
         );
+
+        if (toolCallSummaries === "minimal" && accumulatedToolResults.length > 0) {
+            try {
+                const summary = await summarizeToolBatch([], accumulatedToolResults, config, session.sessionId);
+                const trimmed = summary.trim();
+                if (trimmed && trimmed !== "(no summary)") {
+                    await (msg.channel as TextChannel).send(`-# ${trimmed}`);
+                }
+            } catch (e: any) {
+                await (msg.channel as TextChannel).send(`-# 🛑 Tool summary failed: ${e.message}`);
+            }
+        }
 
         // Prefix reasoning summary if it's a real summary (not fallback)
         let finalResponse = responseText;

@@ -20,3 +20,4 @@ defaultHeaders: {
     "X-Title": "opoclaw",
   },
 ```
+- [x] better tool summaries
