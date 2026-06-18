@@ -21,3 +21,6 @@ defaultHeaders: {
   },
 ```
 - [x] better tool summaries
+- [x] fix attachments
+- [x] option to use real shell
+- [x] video on supported models

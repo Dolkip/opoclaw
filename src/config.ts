@@ -30,7 +30,7 @@ export function formatTOMLValue(value: any): string {
 export interface OpoclawConfig {
     provider?: {
         active?: "openrouter" | "ollama" | "custom";
-        openrouter?: { api_key?: string; model?: string; base_url?: string; vision?: boolean; use_session_ids?: boolean };
+        openrouter?: { api_key?: string; model?: string; base_url?: string; vision?: boolean; video?: boolean; use_session_ids?: boolean };
         ollama?: { base_url?: string; model?: string };
         custom?: {
             base_url?: string;
@@ -40,6 +40,7 @@ export interface OpoclawConfig {
             anthropic_version?: string;
             max_tokens?: number;
             vision?: boolean;
+            video?: boolean;
         };
     };
     channel?: {
@@ -71,6 +72,7 @@ export interface OpoclawConfig {
     reasoning_summary?: boolean;
     reasoning_summary_model?: string;
     basic_tools?: boolean;
+    real_shell?: boolean;
     ollama_semantic_search?: boolean;
     use_toml_files?: boolean;
     authorized_user_id?: string;
@@ -142,6 +144,17 @@ export function getVisionEnabled(config: OpoclawConfig): boolean {
     if (active === "custom") return config.provider?.custom?.vision ?? false;
     if (active === "ollama") return false;
     return config.provider?.openrouter?.vision ?? false;
+}
+
+export function getVideoEnabled(config: OpoclawConfig): boolean {
+    const active = getActiveProvider(config);
+    if (active === "custom") return config.provider?.custom?.video ?? false;
+    if (active === "ollama") return false;
+    return config.provider?.openrouter?.video ?? false;
+}
+
+export function getRealShellEnabled(config: OpoclawConfig): boolean {
+    return config.real_shell ?? false;
 }
 
 export function getExposedCommands(config: OpoclawConfig): string[] {

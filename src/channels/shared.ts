@@ -1,6 +1,6 @@
 import { resolve } from "path";
 import { unlink } from "fs/promises";
-import { getSemanticSearchEnabled, useTomlFiles, type OpoclawConfig } from "../config.ts";
+import { getRealShellEnabled, getSemanticSearchEnabled, useTomlFiles, type OpoclawConfig } from "../config.ts";
 import { listSkills } from "../skills.ts";
 import { readFile } from "../workspace.ts";
 
@@ -53,6 +53,7 @@ function renderSystemPrompt(template: string, channel: string): string {
 
 export async function buildSystemPrompt(config: OpoclawConfig, extraSections: string[] = [], channel = "terminal"): Promise<string> {
     const useToml = useTomlFiles(config);
+    const realShell = getRealShellEnabled(config);
     const [systemBase, agentsContent, soulContent, identityContent, memoryContent, skills] = await Promise.all([
         Bun.file(SYSTEM_PROMPT_FILE).text().catch(() => ""),
         readFile(useToml ? "agents.toml" : "AGENTS.md").catch(() => ""),
@@ -76,7 +77,12 @@ export async function buildSystemPrompt(config: OpoclawConfig, extraSections: st
             "\n## Memory\nThis is your " + (useToml ? "memory.toml" : "MEMORY.md") + ". You can edit that file, but be careful not to accidentally erase information in it.\n```\n" + memoryContent + "\n```",
         );
     }
-    if (getSemanticSearchEnabled(config)) {
+    if (realShell) {
+        parts.push(
+            "\n## Real Shell\nYour `shell` tool runs commands on the real host machine via bash, not a sandbox. Commands execute on the actual system with the bot user's permissions and have real, persistent effects. The whole system is available, including Python and other installed runtimes. The working directory starts at your workspace (`~`) and persists across calls, so `cd` works; exported environment variables do not carry between calls. Be deliberate and careful — destructive commands are genuinely destructive.",
+        );
+    }
+    if (getSemanticSearchEnabled(config) && !realShell) {
         parts.push(
             "\n## Semantic Search\nYou have access to a semantic search command in your shell. Use `semantic-search <query>` and it'll return lines in any file that match embeddings. You don't need to worry about gaming this, remember it's semantic and not keyword based, so even just a description of what you're looking for can work. The command caches efficiently as well.\nThis is the recommended way to search through your memory. You can do multiple searches at once using normal shell syntax like semicolons: `semantic-search <query1>; semantic-search <query2>`",
         );
@@ -86,7 +92,7 @@ export async function buildSystemPrompt(config: OpoclawConfig, extraSections: st
             `\n## Skills\nAvailable skills: ${skills.map((s) => `\`${s}\``).join(", ")}\nTo use a skill, call the use_skill tool with the skill name. It will return the skill's SKILL.md instructions before you apply them.`,
         );
     }
-    if (useToml) {
+    if (useToml && !realShell) {
         parts.push(
             "\n## TOML Editing\nIn your shell, you have a convenient CLI for easy editing. You can use `toml <file> <key> push <value>` to push a value to a key, or `toml <file> <key> remove <value>` to remove a value. If the key or file doesn't exist, it will be created for you.\nThis is the primary way you should be managing memory. You can for example use `toml memory.toml notes push \"<something you want to remember>\"` to add a note to your memory, which will persist across sessions.",
         );

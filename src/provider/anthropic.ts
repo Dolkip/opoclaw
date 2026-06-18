@@ -62,6 +62,7 @@ function buildAnthropicMessages(messages: Message[]): { system: string; messages
                     } else if (part?.type === "image_url" && part.image_url?.url) {
                         blocks.push({ type: "image", source: { type: "url", url: part.image_url.url } });
                     }
+                    // Anthropic has no video input block; video_url parts are dropped.
                 }
                 out.push({ role: "user", content: blocks.length ? blocks : [{ type: "text", text: "" }] });
             } else {

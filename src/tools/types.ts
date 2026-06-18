@@ -30,6 +30,8 @@ export type ToolDefinition = {
     enabled?: (config: OpoclawConfig) => boolean;
     requiresApproval?: boolean;
     handler?: ToolHandler;
+    /** Optional config-dependent override for the tool's description. */
+    describe?: (config: OpoclawConfig) => string;
 };
 
 export function defineTool(

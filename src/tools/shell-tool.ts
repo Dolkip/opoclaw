@@ -4,7 +4,7 @@ import { mkdir, readdir, readFile, writeFile, rm, stat as fsStat } from "fs/prom
 import { Ollama } from "ollama";
 import { WasmShell } from "wasm-shell";
 import { WORKSPACE_DIR } from "../workspace.ts";
-import { getExposedCommands, getSemanticSearchEnabled } from "../config.ts";
+import { getExposedCommands, getRealShellEnabled, getSemanticSearchEnabled } from "../config.ts";
 import { defineTool, type ToolDefinition } from "./types.ts";
 import type { OpoclawConfig } from "../config.ts";
 
@@ -204,10 +204,44 @@ async function ensureShellTools(config: OpoclawConfig): Promise<void> {
     }
 }
 
+const SANDBOX_SHELL_DESCRIPTION =
+    "Run a shell command. This is in a sandboxed environment with a bash-like shell. `~` is your workspace, and is the default working directory. You've got all the commands you'd expect, like `grep`, `cat`, `sed`, and so on. However, you don't have access to Python or other runtimes. Treat this as a way to interact with the workspace and files. You can use `grep -ri 'some text'` to search for text recursively from the working directory.";
+
+const REAL_SHELL_DESCRIPTION =
+    "Run a shell command on the real host machine via bash. This is NOT sandboxed: commands run on the actual system with the bot's user permissions and can affect anything that user can. `~` is your workspace and is the starting working directory. The full system is available, including Python and other installed runtimes. The working directory persists between calls (`cd` works), but environment variables exported in one call do not carry to the next. Be careful: destructive commands really are destructive.";
+
+const CWD_MARKER = "__OPOCLAW_CWD__";
+
+// Working directory for the real host shell; persists across calls so `cd` works.
+let realCwd = WORKSPACE_DIR;
+
+function runRealShell(command: string): Promise<{ stdout: string; stderr: string; code: number; cwd: string }> {
+    // Run the command, then print the resulting cwd on its own marker line so a
+    // `cd` inside the command persists to the next call. The command's own exit
+    // code is preserved.
+    const wrapped = `cd ${JSON.stringify(realCwd)} 2>/dev/null; ${command}\n__opoclaw_code=$?\nprintf '\\n${CWD_MARKER}%s\\n' "$(pwd)"\nexit $__opoclaw_code`;
+    return new Promise((resolve) => {
+        exec(wrapped, { shell: "/bin/bash", maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+            let cwd = realCwd;
+            const lines = stdout.split("\n");
+            for (let i = lines.length - 1; i >= 0; i--) {
+                const idx = lines[i]!.indexOf(CWD_MARKER);
+                if (idx !== -1) {
+                    cwd = lines[i]!.slice(idx + CWD_MARKER.length);
+                    lines.splice(i, 1);
+                    break;
+                }
+            }
+            const code = error && typeof (error as any).code === "number" ? (error as any).code : error ? 1 : 0;
+            resolve({ stdout: lines.join("\n"), stderr, code, cwd });
+        });
+    });
+}
+
 export const SHELL_TOOLS = {
     shell: defineTool(
         "shell",
-        "Run a shell command. This is in a sandboxed environment with a bash-like shell. `~` is your workspace, and is the default working directory. You've got all the commands you'd expect, like `grep`, `cat`, `sed`, and so on. However, you don't have access to Python or other runtimes. Treat this as a way to interact with the workspace and files. You can use `grep -ri 'some text'` to search for text recursively from the working directory.",
+        SANDBOX_SHELL_DESCRIPTION,
         {
             description: {
                 type: "string",
@@ -220,8 +254,27 @@ export const SHELL_TOOLS = {
         },
         ["description", "shell_command"],
         {
+            describe: (config) => (getRealShellEnabled(config) ? REAL_SHELL_DESCRIPTION : SANDBOX_SHELL_DESCRIPTION),
             handler: async (args, { config }) => {
                 if (!args.shell_command) throw new Error("Missing 'shell_command' argument for shell.");
+
+                if (getRealShellEnabled(config)) {
+                    const result = await runRealShell(String(args.shell_command));
+                    realCwd = result.cwd;
+                    let output = "";
+                    if (result.stdout.trim()) output += `stdout:\n\`\`\`${result.stdout.trim()}\`\`\`\n`;
+                    if (result.stderr.trim()) output += `stderr:\n\`\`\`${result.stderr.trim()}\`\`\`\n`;
+                    if (output.length === 0) output = "(no shell output)";
+                    if (result.code !== 0) output = `Command exited with code ${result.code}.\n${output}`;
+
+                    const display = result.cwd === WORKSPACE_DIR
+                        ? "~"
+                        : result.cwd.startsWith(WORKSPACE_DIR + "/")
+                            ? "~" + result.cwd.slice(WORKSPACE_DIR.length)
+                            : result.cwd;
+                    return `${output.trim()}\n(Current directory: ${display})`;
+                }
+
                 await ensureShellTools(config);
                 const result = await wasmShell.exec(String(args.shell_command));
                 let output = "";

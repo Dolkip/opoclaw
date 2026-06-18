@@ -22,7 +22,7 @@ import {
 import { AgentSession, summarizeToolBatch, type Message as ChatMessage, type ToolCall } from "../../agent.ts";
 import { requiresToolApproval } from "../../tools/index.ts";
 import { getFilePath } from "../../workspace.ts";
-import { getVisionEnabled, loadConfig, getActiveProvider, getModelId } from "../../config.ts";
+import { getVisionEnabled, getVideoEnabled, loadConfig, getActiveProvider, getModelId } from "../../config.ts";
 import { isHibernating, setHibernating, buildSystemPrompt, OP_DIR } from "../shared.ts";
 import { exec, getUpdateTag } from "../../utils.ts";
 import { getPollSummary, handlePoll } from "./polls.ts";
@@ -163,7 +163,7 @@ function formatReactions(rm: ReactionManager): string {
         .join(" ");
 }
 
-export async function formatDiscordMessage(client: Client, m: Message, imageAttachments?: { url: string }[]): Promise<ChatMessage | null> {
+export async function formatDiscordMessage(client: Client, m: Message, imageAttachments?: { url: string }[], videoAttachments?: { url: string }[]): Promise<ChatMessage | null> {
     let message_formatted = "";
     if(m.reference && m.reference.type == MessageReferenceType.Default && m.reference.messageId) {
         const ref_m = await m.channel.messages.fetch(m.reference.messageId);
@@ -213,11 +213,32 @@ export async function formatDiscordMessage(client: Client, m: Message, imageAtta
     }
     
     message_formatted += m.content;
-    
-    if (imageAttachments && imageAttachments.length > 0) {
+
+    // List any attachments not inlined as image/video parts so the model knows
+    // they exist and can fetch text-based ones via web_fetch using the CDN URL.
+    const inlinedUrls = new Set<string>([
+        ...(imageAttachments || []).map((a) => a.url),
+        ...(videoAttachments || []).map((a) => a.url),
+    ]);
+    const otherAttachments = Array.from(m.attachments.values()).filter((a: any) => !inlinedUrls.has(a.url));
+    if (otherAttachments.length > 0) {
+        message_formatted += "\n=== Attachments ===\n";
+        for (const a of otherAttachments as any[]) {
+            const meta = [a.contentType || "unknown type"];
+            if (typeof a.size === "number") meta.push(`${a.size} bytes`);
+            message_formatted += `- ${a.name || "file"} (${meta.join(", ")}): ${a.url}\n`;
+        }
+    }
+
+    const hasImages = imageAttachments && imageAttachments.length > 0;
+    const hasVideos = videoAttachments && videoAttachments.length > 0;
+    if (hasImages || hasVideos) {
         const parts: any[] = [{ type: "text", text: message_formatted }];
-        for (const img of imageAttachments) {
+        for (const img of imageAttachments || []) {
             parts.push({ type: "image_url", image_url: { url: img.url } });
+        }
+        for (const vid of videoAttachments || []) {
+            parts.push({ type: "video_url", video_url: { url: vid.url } });
         }
         return { role: "user", content: parts };
     }
@@ -387,6 +408,10 @@ async function onMessage(client: Client, msg: Message) {
     const visionEnabled = getVisionEnabled(config);
     const imageAttachments = visionEnabled
         ? Array.from(msg.attachments.values()).filter((a) => (a.contentType || "").startsWith("image/"))
+        : [];
+    const videoEnabled = getVideoEnabled(config);
+    const videoAttachments = videoEnabled
+        ? Array.from(msg.attachments.values()).filter((a) => (a.contentType || "").startsWith("video/"))
         : [];
 
     let swappedToThinking = false;
@@ -604,7 +629,7 @@ async function onMessage(client: Client, msg: Message) {
     };
 
     try {
-        const formatted = await formatDiscordMessage(client, msg, imageAttachments.length > 0 ? imageAttachments : undefined);
+        const formatted = await formatDiscordMessage(client, msg, imageAttachments.length > 0 ? imageAttachments : undefined, videoAttachments.length > 0 ? videoAttachments : undefined);
         const { text: responseText, reasoningSummary } = await session.evaluatePrompt(
             formatted,
             systemPrompt,

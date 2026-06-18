@@ -37,7 +37,14 @@ export function requiresToolApproval(name: string): boolean {
 export function getTools(config: OpoclawConfig): ToolDefinition[] {
     return (Object.entries(TOOL_DEFINITIONS) as [ToolName, ToolDefinition][])
         .filter(([, definition]) => definition.enabled?.(config) ?? true)
-        .map(([, definition]) => definition);
+        .map(([, definition]) => {
+            if (!definition.describe) return definition;
+            const description = definition.describe(config);
+            return {
+                ...definition,
+                schema: { ...definition.schema, function: { ...definition.schema.function, description } },
+            };
+        });
 }
 
 export function getToolsFiltered(config: OpoclawConfig, exclude: ToolName[], include?: ToolName[]): ToolDefinition[] {

@@ -1,11 +1,12 @@
 import { AgentSession, type Message as AgentMessage, type ToolCall } from "../agent.ts";
-import { getModelId, getVisionEnabled, loadConfig, type OpoclawConfig } from "../config.ts";
+import { getModelId, getVideoEnabled, getVisionEnabled, loadConfig, type OpoclawConfig } from "../config.ts";
 import { requiresToolApproval } from "../tools/index.ts";
 import { buildSystemPrompt } from "./shared.ts";
 
 type OpenAIContentPart =
     | { type: "text"; text?: string }
-    | { type: "image_url"; image_url?: { url?: string } | string };
+    | { type: "image_url"; image_url?: { url?: string } | string }
+    | { type: "video_url"; video_url?: { url?: string } | string };
 
 type OpenAIMessage = {
     role: "system" | "user" | "assistant" | "tool";
@@ -45,7 +46,7 @@ function sse(data: string, status = 200): Response {
     });
 }
 
-function toAgentContent(content: OpenAIMessage["content"], visionEnabled: boolean): AgentMessage["content"] {
+function toAgentContent(content: OpenAIMessage["content"], visionEnabled: boolean, videoEnabled: boolean): AgentMessage["content"] {
     if (!Array.isArray(content)) {
         return content ?? "";
     }
@@ -63,6 +64,12 @@ function toAgentContent(content: OpenAIMessage["content"], visionEnabled: boolea
                 parts.push({ type: "image_url", image_url: { url } });
             }
         }
+        if (part.type === "video_url" && videoEnabled) {
+            const url = typeof part.video_url === "string" ? part.video_url : part.video_url?.url;
+            if (url) {
+                parts.push({ type: "video_url", video_url: { url } });
+            }
+        }
     }
     if (parts.length === 0) return "";
     return parts;
@@ -72,6 +79,7 @@ function toAgentMessages(messages: OpenAIMessage[] | undefined, config: OpoclawC
     const history: AgentMessage[] = [];
     const extraSystemMessages: string[] = [];
     const visionEnabled = getVisionEnabled(config);
+    const videoEnabled = getVideoEnabled(config);
 
     for (const message of messages || []) {
         if (!message || typeof message !== "object") continue;
@@ -91,7 +99,7 @@ function toAgentMessages(messages: OpenAIMessage[] | undefined, config: OpoclawC
 
         history.push({
             role: message.role,
-            content: toAgentContent(message.content, visionEnabled),
+            content: toAgentContent(message.content, visionEnabled, videoEnabled),
             tool_call_id: message.tool_call_id,
             name: message.name,
         });
