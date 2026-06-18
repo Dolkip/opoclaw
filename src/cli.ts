@@ -5,7 +5,7 @@
 
 import { resolve } from "path";
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { homedir } from "os";
 import { createInterface } from "readline/promises";
 import { stdin as input, stdout as output } from "process";
@@ -176,7 +176,10 @@ async function gatewayStart() {
 
   info("Starting gateway...");
 
-  const child = spawn("bun", ["run", "src/index.ts"], {
+  // Use the running bun binary (process.execPath) rather than the bare string
+  // "bun" — on Windows, child_process.spawn does no PATH/PATHEXT resolution and
+  // would throw ENOENT for "bun".
+  const child = spawn(process.execPath, ["run", "src/index.ts"], {
     cwd: OP_DIR,
     stdio: ["ignore", "pipe", "pipe"],
     detached: true,
@@ -670,7 +673,7 @@ function migrateToSnakeCase() {
   let changed = false;
 
   for (const [camel, snake] of Object.entries(CAMEL_TO_SNAKE)) {
-    const regex = new RegExp(`^\s*${camel}(\s*=)`, "gm");
+    const regex = new RegExp(`^\\s*${camel}(\\s*=)`, "gm");
     if (regex.test(text)) {
       text = text.replace(regex, `${snake}$1`);
       changed = true;
@@ -802,9 +805,14 @@ async function main() {
       migrateLessVerboseTools();
       break;
 
-    case "onboard":
-      exec("bun run installers/onboard.ts", { cwd: OP_DIR });
+    case "onboard": {
+      // Run interactively — the wizard prompts via readline, so it needs the
+      // real stdio inherited (exec() pipes stdio and the prompts would hang).
+      const onboardScript = resolve(OP_DIR, "installers/onboard.ts");
+      const r = spawnSync(process.execPath, ["run", onboardScript], { cwd: OP_DIR, stdio: "inherit" });
+      if (r.status !== 0) process.exit(r.status ?? 1);
       break;
+    }
 
     case "version":
     case "v":

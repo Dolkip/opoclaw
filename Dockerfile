@@ -11,4 +11,6 @@ COPY installers ./installers
 
 ENV OPOCLAW_CONFIG_PATH=/app/config.toml
 
-CMD ["bun", "run", "src/cli.ts", "gateway", "start"]
+# Run the gateway in the foreground — `cli.ts gateway start` detaches a child
+# and exits, which would terminate the container immediately.
+CMD ["bun", "run", "src/index.ts"]

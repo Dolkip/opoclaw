@@ -89,6 +89,25 @@ _You're not a chatbot. You're becoming someone._
 Be the assistant you'd actually want to talk to.
 `;
 
+const DEFAULT_AGENTS_TOML = `# <filename> - operating instructions
+session = [
+    "Read soul.toml — this is who you are.",
+    "Read identity.toml — this is who you are.",
+    "Read memory.toml — this is what you remember.",
+]
+memory = [
+    "Long-term memory lives in memory.toml.",
+]
+safety = [
+    "Don't exfiltrate private data.",
+    "Don't run destructive commands without asking.",
+    "trash > rm",
+]
+group_chats = [
+    "Participate, don't dominate. Respond when you can add value.",
+]
+`;
+
 const DEFAULT_SOUL_TOML = `# <filename> - who you are
 traits = [
     "Be genuinely helpful, not performatively helpful. Skip the filler, just help.",
@@ -310,6 +329,7 @@ async function main() {
         "HEARTBEAT.md": DEFAULT_HEARTBEAT,
     };
     const filesToml: Record<string, string> = {
+        "agents.toml": DEFAULT_AGENTS_TOML,
         "soul.toml": DEFAULT_SOUL_TOML,
         "identity.toml": DEFAULT_IDENTITY_TOML,
         "memory.toml": DEFAULT_MEMORY_TOML,
@@ -335,7 +355,7 @@ async function main() {
     console.log("Next steps:");
     console.log(`  1. Review ${CONFIG_FILE}`);
     console.log(`  2. Fill in workspace/SOUL.md and workspace/IDENTITY.md`);
-    console.log(`  3. Run: bun run src/index.ts`);
+    console.log(`  3. Run: opoclaw gateway start`);
     console.log(`  4. Mention your bot in Discord to test\n`);
 }
 

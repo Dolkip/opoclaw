@@ -14,7 +14,6 @@ header(){ echo -e "\n${BOLD}═══ $* ═══${RESET}\n"; }
 
 REPO_URL="https://github.com/oponic/opoclaw.git"
 INSTALL_DIR="$HOME/Documents/opoclaw"
-BIN_DIR="$HOME/.local/bin"
 
 detect_os() {
     case "$(uname -s)" in
@@ -33,19 +32,6 @@ fi
 header "opoclaw installer ($OS)"
 
 # ── Package managers ────────────────────────────────────────────────────────
-
-install_brew_macos() {
-    if command -v brew &>/dev/null; then
-        ok "Homebrew already installed"
-        return
-    fi
-    info "Installing Homebrew..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    if [ -x "/opt/homebrew/bin/brew" ]; then
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-    fi
-    ok "Homebrew installed"
-}
 
 install_bun() {
     if command -v bun &>/dev/null; then
@@ -127,9 +113,6 @@ install_deps() {
 # ── Main ────────────────────────────────────────────────────────────────────
 
 header "Checking dependencies"
-case "$OS" in
-    macos) install_brew_macos ;;
-esac
 ensure_git
 install_bun
 

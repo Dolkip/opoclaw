@@ -19,10 +19,12 @@ export function exec(cmd: string, opts?: { cwd?: string }): string {
     return execSync(cmd, { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], ...opts }).trim();
 }
 
-function runGit(cmd: string): string | null {
+// Run git directly (no shell) so it works on Windows too — Bun.spawn resolves
+// the executable on PATH. Returns null if git is missing or exits non-zero.
+function runGit(args: string[]): string | null {
     try {
         const p = Bun.spawnSync({
-            cmd: ["bash", "-lc", cmd],
+            cmd: ["git", ...args],
             cwd: OP_DIR,
             stdout: "pipe",
             stderr: "pipe",
@@ -64,7 +66,7 @@ function pickLatestTag(tags: string[], channel: "stable" | "unstable", currentTa
 }
 
 function getCurrentTag(): string | undefined {
-    const currentTag = runGit("git describe --tags --abbrev=0 2>/dev/null || echo ''");
+    const currentTag = runGit(["describe", "--tags", "--abbrev=0"]);
     if (!currentTag) {
         cachedUpdateTag = null;
         return undefined;
@@ -84,8 +86,8 @@ export async function getUpdateTag(): Promise<string | null> {
     const currentTag = getCurrentTag();
     if(currentTag == undefined) { return null; }
     
-    runGit("git fetch --tags 2>/dev/null || true");
-    const tagsRaw = runGit("git tag --sort=-v:refname") || "";
+    runGit(["fetch", "--tags"]);
+    const tagsRaw = runGit(["tag", "--sort=-v:refname"]) || "";
     const tags = tagsRaw.split("\n").map((t) => t.trim()).filter(Boolean);
     const latestTag = pickLatestTag(tags, channel, currentTag);
     if (latestTag && latestTag !== currentTag) {
@@ -98,11 +100,11 @@ export async function getUpdateTag(): Promise<string | null> {
 
 export async function checkForUpdate(silent = false): Promise<string | null> {
     try {
-        const currentTag = runGit("git describe --tags --abbrev=0 2>/dev/null || echo ''");
+        const currentTag = runGit(["describe", "--tags", "--abbrev=0"]);
         if (!currentTag) return null;
 
-        runGit("git fetch --tags 2>/dev/null || true");
-        const tagsRaw = runGit("git tag --sort=-v:refname") || "";
+        runGit(["fetch", "--tags"]);
+        const tagsRaw = runGit(["tag", "--sort=-v:refname"]) || "";
         const tags = tagsRaw.split("\n").map((t) => t.trim()).filter(Boolean);
         let channel: "stable" | "unstable" = "stable";
         try {
@@ -142,9 +144,9 @@ export async function doUpdate(channelOverride?: "unstable", restart?: () => Pro
     }
 
     info("Pulling latest changes...");
-    runGit("git fetch --tags 2>/dev/null || true");
-    const currentTag = runGit("git describe --tags --abbrev=0 2>/dev/null || echo ''") || "";
-    const tagsRaw = runGit("git tag --sort=-v:refname") || "";
+    runGit(["fetch", "--tags"]);
+    const currentTag = runGit(["describe", "--tags", "--abbrev=0"]) || "";
+    const tagsRaw = runGit(["tag", "--sort=-v:refname"]) || "";
     const tags = tagsRaw.split("\n").map((t) => t.trim()).filter(Boolean);
     let channel: "stable" | "unstable" = "stable";
     try {

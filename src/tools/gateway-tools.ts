@@ -4,6 +4,30 @@ import { getConfigPath, parseTOML, toTOML } from "../config.ts";
 import { defineTool, type ToolDefinition } from "./types.ts";
 import { setHibernating } from "../channels/shared.ts";
 
+const PROJECT_ROOT = path.resolve(import.meta.dir, "../..");
+
+// Spawn a detached helper that waits ~1s (so the tool's reply is sent first),
+// then runs `opoclaw <cliArgs>` via the running bun binary. Cross-platform:
+// no bash, no `sleep`, and no bare "bun" lookup (which fails on Windows).
+function relaunchDetached(cliArgs: string[]): void {
+    const inner = JSON.stringify(["run", "src/cli.ts", ...cliArgs]);
+    const root = JSON.stringify(PROJECT_ROOT);
+    const script =
+        `await Bun.sleep(1000); ` +
+        `Bun.spawnSync({ cmd: [process.execPath, ...${inner}], cwd: ${root}, ` +
+        `stdout: "ignore", stderr: "ignore", stdin: "ignore" });`;
+    const proc = Bun.spawn({
+        cmd: [process.execPath, "-e", script],
+        cwd: PROJECT_ROOT,
+        stdout: "ignore",
+        stderr: "ignore",
+        detached: true,
+    });
+    if (typeof (proc as any).unref === "function") {
+        (proc as any).unref();
+    }
+}
+
 function setNestedValue(obj: Record<string, any>, keyPath: string, value: any): void {
     const parts = keyPath.split(".").map((part) => part.trim()).filter(Boolean);
     if (parts.length === 0) {
@@ -73,16 +97,7 @@ export const GATEWAY_TOOLS = {
         {
             requiresApproval: true,
             handler: async () => {
-                const proc = Bun.spawn({
-                    cmd: ["bash", "-lc", "sleep 1; bun run src/cli.ts gateway restart"],
-                    cwd: path.resolve(import.meta.dir, "../.."),
-                    stdout: "ignore",
-                    stderr: "ignore",
-                    detached: true,
-                });
-                if (typeof (proc as any).unref === "function") {
-                    (proc as any).unref();
-                }
+                relaunchDetached(["gateway", "restart"]);
                 return "Gateway restart initiated.";
             },
         },
@@ -108,16 +123,7 @@ export const GATEWAY_TOOLS = {
         {
             requiresApproval: true,
             handler: async () => {
-                const proc = Bun.spawn({
-                    cmd: ["bash", "-lc", "sleep 1; bun run src/cli.ts update"],
-                    cwd: path.resolve(import.meta.dir, "../.."),
-                    stdout: "ignore",
-                    stderr: "ignore",
-                    detached: true,
-                });
-                if (typeof (proc as any).unref === "function") {
-                    (proc as any).unref();
-                }
+                relaunchDetached(["update"]);
                 return "Update initiated.";
             },
         },

@@ -2,7 +2,6 @@
 
 $RepoUrl = "https://github.com/oponic/opoclaw.git"
 $InstallDir = "$HOME\Documents\opoclaw"
-$BinDir = "$HOME\.local\bin"
 
 function Write-Header($msg){ Write-Host "`n═══ $msg ═══`n" -ForegroundColor White -BackgroundColor DarkBlue }
 function Write-Info($msg)  { Write-Host "[opoclaw] $msg" -ForegroundColor Cyan }
@@ -52,7 +51,8 @@ function Clone-Repo {
         Write-Ok "opoclaw already exists — pulling latest"
         Set-Location $InstallDir
         git fetch --tags
-        git checkout main 2>$null || git checkout -b main
+        git checkout main 2>$null
+        if ($LASTEXITCODE -ne 0) { git checkout -b main }
         git pull --rebase
         $latestTag = git tag --sort=-v:refname | Select-Object -First 1
         if ($latestTag) {
@@ -90,7 +90,7 @@ Clone-Repo
 Install-Dependencies
 
 Write-Header "Installing opoclaw command"
-bun run src/cli.ts install
+bun run src/cli.ts install --service
 
 Write-Header "Launching onboard wizard"
 Set-Location $InstallDir
