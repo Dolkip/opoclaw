@@ -8,7 +8,7 @@
 - Use the new `opoclaw chat` to speak with your agent in the terminal
 ## v2.1.x
 - Heartbeat and cron interface
-## v2.2.x
+## v2.3.x
 - Plugin interface
 - Included pluginset (dreamer, usermode, webview)
 - Various QoL updates and increase in agent autonomy
