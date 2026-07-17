@@ -125,7 +125,16 @@ bun run src/cli.ts install --service
 
 header "Launching onboard wizard"
 cd "$INSTALL_DIR"
-bun run installers/onboard.ts
+# When this script is run via `curl … | bash`, stdin is the piped script, not the
+# terminal, so the wizard's prompts would read EOF. Redirect from /dev/tty when
+# it's available so onboarding stays interactive; otherwise skip and let the user
+# run `opoclaw onboard` themselves.
+if [ -r /dev/tty ]; then
+    bun run installers/onboard.ts < /dev/tty
+else
+    warn "No interactive terminal detected — skipping onboarding."
+    warn "Run 'opoclaw onboard' to configure opoclaw."
+fi
 
 echo ""
 ok "opoclaw is installed!"

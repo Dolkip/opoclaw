@@ -93,6 +93,21 @@ describe("tools", () => {
     }
   });
 
+  test("shell runs a sandboxed command via 'command' param", async () => {
+    const res = await handleToolCall(
+      "shell",
+      { description: "Echoing", command: "echo hello-shell" },
+      DUMMY_TOOL_CONTEXT,
+    );
+    expect(res).toContain("hello-shell");
+  });
+
+  test("shell throws when 'command' is missing", async () => {
+    await expect(
+      handleToolCall("shell", { description: "Nothing" } as any, DUMMY_TOOL_CONTEXT),
+    ).rejects.toThrow(/command/);
+  });
+
   test("search uses duckduckgo html parser", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input: any) => {

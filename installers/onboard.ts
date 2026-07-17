@@ -13,13 +13,42 @@ import type { OpoclawConfig } from "../src/config.ts";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+// Read prompts through a single readline interface, consuming its `line` events
+// via a queue instead of calling `rl.question()` repeatedly. Bun's `question()`
+// hangs on the second call when stdin is piped (only the first buffered line is
+// delivered), which silently broke onboarding. Listening to `line` once and
+// queueing works for both piped and interactive input.
+const rl = createInterface({ input: process.stdin });
+const lineQueue: string[] = [];
+let lineWaiter: ((line: string) => void) | null = null;
+let stdinClosed = false;
+
+rl.on("line", (line) => {
+    if (lineWaiter) {
+        const resolve = lineWaiter;
+        lineWaiter = null;
+        resolve(line);
+    } else {
+        lineQueue.push(line);
+    }
+});
+rl.on("close", () => {
+    stdinClosed = true;
+    if (lineWaiter) {
+        const resolve = lineWaiter;
+        lineWaiter = null;
+        resolve("");
+    }
+});
+
+const closeRl = () => rl.close();
+
 const ask = (prompt: string): Promise<string> => {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    process.stdout.write(kleur.cyan(prompt));
     return new Promise((resolve) => {
-        rl.question(kleur.cyan(prompt), (answer) => {
-            rl.close();
-            resolve(answer.trim());
-        });
+        if (lineQueue.length > 0) return resolve(lineQueue.shift()!.trim());
+        if (stdinClosed) return resolve("");
+        lineWaiter = (line) => resolve(line.trim());
     });
 };
 
@@ -359,7 +388,12 @@ async function main() {
     console.log(`  4. Mention your bot in Discord to test\n`);
 }
 
-main().catch((err) => {
-    console.error(err);
-    process.exit(1);
-});
+main()
+    .then(() => {
+        closeRl();
+    })
+    .catch((err) => {
+        closeRl();
+        console.error(err);
+        process.exit(1);
+    });

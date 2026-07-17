@@ -3,8 +3,8 @@
  * opoclaw CLI — usage, gateway management, updates, uninstall
  */
 
-import { resolve } from "path";
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
+import { resolve, dirname } from "path";
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, statSync, openSync, readSync, closeSync } from "fs";
 import { spawn, spawnSync } from "child_process";
 import { homedir } from "os";
 import { createInterface } from "readline/promises";
@@ -21,6 +21,7 @@ import { exec, checkForUpdate, doUpdate } from "./utils.ts";
 
 const USAGE_FILE = resolve(OP_DIR, "usage.json");
 const WORKSPACE_DIR = resolve(OP_DIR, "workspace");
+const LOG_FILE = resolve(OP_DIR, "logs/gateway.log");
 const BIN_DIR = `${homedir()}/.local/bin`;
 const OPCLAW_BIN = `${BIN_DIR}/opoclaw`;
 const OPCLAW_BIN_WIN = `${BIN_DIR}/opoclaw.cmd`;
@@ -76,6 +77,16 @@ function getOS(): "macos" | "linux" | "windows" {
   return "linux";
 }
 
+// Run a command with the terminal's stdio inherited so interactive prompts —
+// notably sudo's password prompt — reach the user. The piped `exec` helper
+// swallows the TTY, which makes sudo fail with "no tty present". Throws on a
+// non-zero exit so callers can surface the failure.
+function execInteractive(cmd: string, args: string[]): void {
+  const r = spawnSync(cmd, args, { stdio: "inherit" });
+  if (r.error) throw r.error;
+  if (r.status !== 0) throw new Error(`${cmd} exited with code ${r.status}`);
+}
+
 
 // ── Usage ──────────────────────────────────────────────────────────────────
 
@@ -114,6 +125,64 @@ async function showUsage() {
   console.log();
 }
 
+
+// ── Logs ───────────────────────────────────────────────────────────────────
+
+// Read `count` bytes from `fd` starting at `offset` and return the decoded text.
+function readFrom(fd: number, offset: number, count: number): string {
+  if (count <= 0) return "";
+  const buf = Buffer.allocUnsafe(count);
+  const bytes = readSync(fd, buf, 0, count, offset);
+  return buf.subarray(0, bytes).toString("utf-8");
+}
+
+async function showLogs(opts: { follow: boolean; lines: number }) {
+  if (!existsSync(LOG_FILE)) {
+    warn(`No log file found at ${LOG_FILE}`);
+    console.log(`${subtle("The gateway writes this file once it has run. Start it with")} ${cmdStyle("opoclaw gateway start")}${subtle(".")}`);
+    return;
+  }
+
+  info(`Tailing ${LOG_FILE}${opts.follow ? "  (Ctrl+C to stop)" : ""}`);
+  const size = statSync(LOG_FILE).size;
+
+  // Print the last `lines` lines by reading the whole file once. Log files are
+  // small (a single gateway process appends to them), so this is cheap.
+  const full = readFileSync(LOG_FILE, "utf-8");
+  const allLines = full.split("\n");
+  // A trailing newline yields a final empty element; drop it so counts are right.
+  if (allLines.length > 0 && allLines[allLines.length - 1] === "") allLines.pop();
+  const tail = allLines.slice(-opts.lines);
+  if (tail.length > 0) console.log(tail.join("\n"));
+
+  if (!opts.follow) return;
+
+  // Follow mode: poll the file size and print any appended bytes. If the file
+  // shrinks (rotation/truncation), reset to the new start.
+  let offset = size;
+  await new Promise<void>(() => {
+    const tick = () => {
+      let stat;
+      try {
+        stat = statSync(LOG_FILE);
+      } catch {
+        return; // file briefly gone (e.g. rotation); try again next tick
+      }
+      if (stat.size < offset) offset = 0; // truncated/rotated
+      if (stat.size > offset) {
+        const fd = openSync(LOG_FILE, "r");
+        try {
+          const chunk = readFrom(fd, offset, stat.size - offset);
+          offset = stat.size;
+          if (chunk) process.stdout.write(chunk);
+        } finally {
+          closeSync(fd);
+        }
+      }
+    };
+    setInterval(tick, 500);
+  });
+}
 
 // ── Gateway Management ─────────────────────────────────────────────────────
 
@@ -418,6 +487,13 @@ function installService() {
 
   switch (os) {
     case "macos": {
+      // ProgramArguments must be the long-running gateway itself. Running
+      // `opoclaw gateway start` forks a detached child and exits — with
+      // KeepAlive=true launchd would then relaunch it in a tight loop, spawning
+      // orphaned gateways. Run src/index.ts in the foreground with the absolute
+      // bun binary, and put its directory on PATH so bun/git resolve.
+      const bunBin = process.execPath;
+      const bunDir = dirname(bunBin);
       const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -426,18 +502,19 @@ function installService() {
     <string>com.oponic.opoclaw</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${OPCLAW_BIN}</string>
-        <string>gateway</string>
-        <string>start</string>
+        <string>${bunBin}</string>
+        <string>run</string>
+        <string>${OP_DIR}/src/index.ts</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>${bunDir}:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
-    <key>StandardOutPath</key>
-    <string>${OP_DIR}/logs/gateway.log</string>
-    <key>StandardErrorPath</key>
-    <string>${OP_DIR}/logs/gateway.log</string>
     <key>WorkingDirectory</key>
     <string>${OP_DIR}</string>
 </dict>
@@ -452,6 +529,29 @@ function installService() {
       break;
     }
     case "linux": {
+      // The service must run as the human user, not root — when this command is
+      // run via sudo, whoami/homedir report root, so prefer SUDO_USER.
+      const svcUser = process.env.SUDO_USER || exec("whoami");
+      let svcHome = homedir();
+      if (process.env.SUDO_USER) {
+        try {
+          const pw = exec(`getent passwd ${svcUser}`);
+          svcHome = pw.split(":")[5] || `/home/${svcUser}`;
+        } catch {
+          svcHome = `/home/${svcUser}`;
+        }
+      }
+
+      // ExecStart must be the long-running gateway process itself. The old unit
+      // ran `opoclaw gateway start`, which forks a detached child and exits —
+      // systemd (Type=simple) then treats the service as dead and tears down the
+      // cgroup, killing the gateway. Run src/index.ts in the foreground instead.
+      // Use the absolute bun binary and put its directory on PATH, since
+      // systemd's default PATH does not include ~/.bun/bin.
+      const bunBin = process.execPath;
+      const bunDir = dirname(bunBin);
+      const servicePath = `${bunDir}:/usr/local/bin:/usr/bin:/bin`;
+
       const unit = `[Unit]
 Description=opoclaw AI Gateway
 After=network-online.target
@@ -459,25 +559,39 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=${exec("whoami")}
+User=${svcUser}
 WorkingDirectory=${OP_DIR}
-ExecStart=${OPCLAW_BIN} gateway start
+Environment=HOME=${svcHome}
+Environment=PATH=${servicePath}
+ExecStart=${bunBin} run ${OP_DIR}/src/index.ts
 Restart=on-failure
 RestartSec=5
-StandardOutput=append:${OP_DIR}/logs/gateway.log
-StandardError=append:${OP_DIR}/logs/gateway.log
 
 [Install]
 WantedBy=multi-user.target`;
+
       mkdirSync(`${OP_DIR}/logs`, { recursive: true });
-      writeFileSync(SYSTEMD_PATH, unit);
-      exec("sudo systemctl daemon-reload");
-      exec("sudo systemctl enable opoclaw.service");
-      exec("sudo systemctl start opoclaw.service");
+      // The daemon runs as svcUser, so it must own the log dir it appends to.
+      try { exec(`chown -R ${svcUser} ${OP_DIR}/logs`); } catch {}
+
+      // /etc/systemd/system is root-owned — writeFileSync there fails with EACCES
+      // for a normal user. Stage the unit in the project dir, then install it with
+      // sudo. `sudo` will prompt for a password if the user lacks a cached grant.
+      const stagedUnit = resolve(OP_DIR, SYSTEMD_NAME);
+      writeFileSync(stagedUnit, unit);
+      try {
+        execInteractive("sudo", ["install", "-m", "644", stagedUnit, SYSTEMD_PATH]);
+      } finally {
+        try { unlinkSync(stagedUnit); } catch {}
+      }
+      execInteractive("sudo", ["systemctl", "daemon-reload"]);
+      execInteractive("sudo", ["systemctl", "enable", "opoclaw.service"]);
+      execInteractive("sudo", ["systemctl", "start", "opoclaw.service"]);
       ok("Linux systemd service installed and started");
       console.log(`${chip("MANAGE", "green")}`);
       console.log(`  ${cmdStyle("systemctl status opoclaw")}`);
-      console.log(`  ${cmdStyle("systemctl stop opoclaw")}`);
+      console.log(`  ${cmdStyle("sudo systemctl stop opoclaw")}`);
+      console.log(`  ${cmdStyle("journalctl -u opoclaw -f")}`);
       break;
     }
     case "windows": {
@@ -505,10 +619,12 @@ function uninstallService() {
     }
     case "linux": {
       try {
-        exec("sudo systemctl stop opoclaw.service 2>/dev/null || true");
-        exec("sudo systemctl disable opoclaw.service 2>/dev/null || true");
-        exec("sudo rm -f /etc/systemd/system/opoclaw.service");
-        exec("sudo systemctl daemon-reload");
+        // Inherit stdio so sudo can prompt for a password if needed. Stop/disable
+        // may fail if the unit isn't present; that's fine, so ignore their status.
+        try { execInteractive("sudo", ["systemctl", "stop", "opoclaw.service"]); } catch {}
+        try { execInteractive("sudo", ["systemctl", "disable", "opoclaw.service"]); } catch {}
+        execInteractive("sudo", ["rm", "-f", SYSTEMD_PATH]);
+        execInteractive("sudo", ["systemctl", "daemon-reload"]);
         ok("Linux service removed");
       } catch { warn("No service found"); }
       break;
@@ -751,6 +867,151 @@ function migrateToSectionedConfig() {
   ok("Migrated to sectioned [channel.*] and [provider.*]. Backup at config.toml.sectioned.bak");
 }
 
+// ── Config Reference ─────────────────────────────────────────────────────────
+
+interface ConfigOption {
+  key: string;          // dotted path, e.g. "provider.openrouter.api_key"
+  type: string;         // human-readable type
+  def: string;          // default, as displayed
+  desc: string;         // one-line description
+}
+
+interface ConfigGroup {
+  title: string;
+  tone: ChipTone;
+  options: ConfigOption[];
+}
+
+const CONFIG_REFERENCE: ConfigGroup[] = [
+  {
+    title: "PROVIDER",
+    tone: "magenta",
+    options: [
+      { key: "provider.active", type: "openrouter|ollama|custom", def: "openrouter", desc: "Which provider to use" },
+      { key: "provider.openrouter.api_key", type: "string", def: "—", desc: "OpenRouter API key (sk-or-v1-...)" },
+      { key: "provider.openrouter.model", type: "string", def: "openrouter/auto", desc: "OpenRouter model ID" },
+      { key: "provider.openrouter.base_url", type: "string", def: "https://openrouter.ai/api", desc: "OpenRouter API base URL" },
+      { key: "provider.openrouter.vision", type: "boolean", def: "false", desc: "Send image attachments to the model" },
+      { key: "provider.openrouter.video", type: "boolean", def: "false", desc: "Send video attachments to the model" },
+      { key: "provider.openrouter.use_session_ids", type: "boolean", def: "true", desc: "Include session IDs in requests" },
+      { key: "provider.ollama.base_url", type: "string", def: "http://localhost:11434", desc: "Ollama server URL" },
+      { key: "provider.ollama.model", type: "string", def: "llama3.2", desc: "Ollama model name" },
+      { key: "provider.custom.base_url", type: "string", def: "—", desc: "Custom endpoint base URL" },
+      { key: "provider.custom.api_key", type: "string", def: "—", desc: "Custom endpoint API key" },
+      { key: "provider.custom.model", type: "string", def: "—", desc: "Custom model name" },
+      { key: "provider.custom.api_type", type: "openai|anthropic", def: "openai", desc: "Wire format of the custom endpoint" },
+      { key: "provider.custom.anthropic_version", type: "string", def: "2023-06-01", desc: "anthropic-version header (anthropic only)" },
+      { key: "provider.custom.max_tokens", type: "number", def: "1024", desc: "Max output tokens (anthropic only)" },
+      { key: "provider.custom.vision", type: "boolean", def: "false", desc: "Send image attachments to the model" },
+      { key: "provider.custom.video", type: "boolean", def: "false", desc: "Send video attachments to the model" },
+    ],
+  },
+  {
+    title: "CHANNELS",
+    tone: "blue",
+    options: [
+      { key: "channel.discord.enabled", type: "boolean", def: "false", desc: "Enable the Discord channel" },
+      { key: "channel.discord.token", type: "string", def: "—", desc: "Discord bot token" },
+      { key: "channel.discord.allow_bots", type: "boolean", def: "false", desc: "Respond to other bots" },
+      { key: "channel.discord.notify_channel", type: "string", def: "—", desc: "Channel ID for update notifications" },
+      { key: "channel.irc.enabled", type: "boolean", def: "false", desc: "Enable the IRC channel" },
+      { key: "channel.irc.server", type: "string", def: "—", desc: "IRC server host" },
+      { key: "channel.irc.port", type: "number", def: "6667", desc: "IRC server port" },
+      { key: "channel.irc.tls", type: "boolean", def: "false", desc: "Connect over TLS" },
+      { key: "channel.irc.nick", type: "string", def: "—", desc: "IRC nickname" },
+      { key: "channel.irc.username", type: "string", def: "—", desc: "IRC username" },
+      { key: "channel.irc.realname", type: "string", def: "—", desc: "IRC realname" },
+      { key: "channel.irc.password", type: "string", def: "—", desc: "IRC server password" },
+      { key: "channel.irc.channels", type: "string", def: "—", desc: "Comma-separated channels to join" },
+      { key: "channel.openai.enabled", type: "boolean", def: "false", desc: "Enable the OpenAI-compatible API channel" },
+      { key: "channel.openai.host", type: "string", def: "127.0.0.1", desc: "Bind host for the API server" },
+      { key: "channel.openai.port", type: "number", def: "—", desc: "Bind port for the API server" },
+      { key: "channel.openai.api_key", type: "string", def: "—", desc: "Bearer token required from clients" },
+    ],
+  },
+  {
+    title: "MODEL BEHAVIOR",
+    tone: "cyan",
+    options: [
+      { key: "enable_reasoning", type: "boolean", def: "false", desc: "Request model reasoning/thinking" },
+      { key: "reasoning_summary", type: "boolean", def: "false", desc: "Summarize reasoning (extra API call)" },
+      { key: "reasoning_summary_model", type: "string", def: "main model", desc: "Model used for reasoning summaries" },
+    ],
+  },
+  {
+    title: "TOOLS",
+    tone: "green",
+    options: [
+      { key: "basic_tools", type: "boolean", def: "true", desc: "Enable read_file/edit_file/list_files" },
+      { key: "real_shell", type: "boolean", def: "false", desc: "Use the real host shell instead of the sandbox" },
+      { key: "exposed_commands", type: "string[]", def: "[]", desc: "Host commands exposed inside the sandbox shell" },
+      { key: "ollama_semantic_search", type: "boolean", def: "false", desc: "Enable the semantic-search sandbox command" },
+      { key: "enable_web_fetch", type: "boolean", def: "true", desc: "Enable the web_fetch tool" },
+      { key: "search_provider", type: "duckduckgo|tavily", def: "duckduckgo", desc: "Web search backend" },
+      { key: "tavily_api_key", type: "string", def: "—", desc: "Tavily API key (tvly-...)" },
+      { key: "mounts", type: "table", def: "{}", desc: "Extra path mounts for file tools (name = path)" },
+    ],
+  },
+  {
+    title: "GENERAL",
+    tone: "yellow",
+    options: [
+      { key: "use_toml_files", type: "boolean", def: "false", desc: "Use *.toml workspace files instead of *.md" },
+      { key: "authorized_user_id", type: "string", def: "—", desc: "User ID allowed to approve sensitive actions" },
+      { key: "tool_call_summaries", type: "full|minimal|off", def: "full", desc: "Verbosity of tool-call status messages" },
+      { key: "update_channel", type: "stable|unstable", def: "stable", desc: "Release channel used by `update`" },
+      { key: "show_update_notification", type: "boolean", def: "true", desc: "Announce available updates in Discord" },
+      { key: "heartbeat.enabled", type: "boolean", def: "false", desc: "Run the periodic heartbeat agent" },
+      { key: "heartbeat.interval_minutes", type: "number", def: "60", desc: "Minutes between heartbeat runs" },
+      { key: "dreamer.enabled", type: "boolean", def: "false", desc: "Run the end-of-day dreamer reflection" },
+    ],
+  },
+];
+
+function getNested(obj: any, dotted: string): any {
+  return dotted.split(".").reduce((acc, part) => (acc == null ? undefined : acc[part]), obj);
+}
+
+function showConfigReference() {
+  const configPath = getConfigPath();
+  let current: Record<string, any> | null = null;
+  if (existsSync(configPath)) {
+    try {
+      current = parseTOML(readFileSync(configPath, "utf-8"));
+    } catch (e: any) {
+      warn(`Could not parse ${configPath}: ${e.message}`);
+    }
+  }
+
+  console.log(banner());
+  console.log(`\n${chip("CONFIG REFERENCE", "magenta")}`);
+  console.log(`${label("File:")} ${value(configPath)}${current ? "" : subtle("  (not found — showing defaults only)")}\n`);
+
+  // Redact obviously sensitive values when echoing the current config.
+  const isSecret = (key: string) => /(_key|token|password)$/.test(key.split(".").pop() || "");
+  const fmtCurrent = (key: string, val: any): string => {
+    if (val === undefined) return "";
+    if (isSecret(key) && val) return kleur.green("set");
+    if (Array.isArray(val)) return kleur.green(`[${val.length}]`);
+    if (val && typeof val === "object") return kleur.green("{…}");
+    return kleur.green(String(val));
+  };
+
+  for (const group of CONFIG_REFERENCE) {
+    console.log(`${chip(group.title, group.tone)}`);
+    for (const opt of group.options) {
+      const cur = current ? fmtCurrent(opt.key, getNested(current, opt.key)) : "";
+      const head = `  ${cmdStyle(opt.key)} ${subtle(`(${opt.type})`)}`;
+      console.log(head);
+      const meta = `      ${opt.desc}  ${subtle(`default: ${opt.def}`)}${cur ? `  ${subtle("current:")} ${cur}` : ""}`;
+      console.log(meta);
+    }
+    console.log();
+  }
+
+  console.log(`${subtle("Edit")} ${cmdStyle(configPath)} ${subtle("directly, or run")} ${cmdStyle("opoclaw onboard")} ${subtle("to regenerate it.")}\n`);
+}
+
 // ── CLI Router ─────────────────────────────────────────────────────────────
 
 async function main() {
@@ -882,6 +1143,23 @@ ${value("Toggle:")} ${subtle("channel.discord.allow_bots, enable_reasoning, reas
       await chatTui();
       break;
 
+    case "config":
+      showConfigReference();
+      break;
+
+    case "logs": {
+      const rest = args.slice(1);
+      const follow = rest.includes("-f") || rest.includes("--follow");
+      let lines = 200;
+      const nIdx = rest.findIndex((a) => a === "-n" || a === "--lines");
+      if (nIdx !== -1 && rest[nIdx + 1] !== undefined) {
+        const parsed = parseInt(rest[nIdx + 1]!, 10);
+        if (Number.isFinite(parsed) && parsed > 0) lines = parsed;
+      }
+      await showLogs({ follow, lines });
+      break;
+    }
+
     case "help":
     case "--help":
     case "-h":
@@ -901,6 +1179,7 @@ ${chip("COMMANDS", "magenta")}
   ${cmdStyle("gateway status")}     ${subtle("Check if gateway is running")}
   ${cmdStyle("update [unstable]")}  ${subtle("Pull latest release and restart (use unstable channel)")}
   ${cmdStyle("chat")}               ${subtle("Start interactive terminal chat (Core channel)")}
+  ${cmdStyle("logs [-f] [-n N]")}   ${subtle("Show gateway logs (--follow to tail, -n for line count)")}
   ${cmdStyle("check-update")}       ${subtle("Check for available updates")}
   ${cmdStyle("install")}            ${subtle("Install opoclaw command + optional service")}
   ${cmdStyle("service install")}    ${subtle("Install auto-start service (systemd/launchd)")}
@@ -909,6 +1188,7 @@ ${chip("COMMANDS", "magenta")}
   ${cmdStyle("explainer")}          ${subtle("How opoclaw works")}
   ${cmdStyle("migrate")}            ${subtle("Upgrade config (JSON→TOML, camelCase→snake_case, sections)")}
   ${cmdStyle("onboard")}            ${subtle("Run onboarding wizard")}
+  ${cmdStyle("config")}             ${subtle("List all config options, defaults, and current values")}
   ${cmdStyle("version")}            ${subtle("Print current version (git tag)")}
   ${cmdStyle("help")}               ${subtle("Show this help")}
 

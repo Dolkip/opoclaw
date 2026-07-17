@@ -247,19 +247,19 @@ export const SHELL_TOOLS = {
                 type: "string",
                 description: "User-facing description of what you're doing. Like: \"Searching through memory files\", \"Writing to MEMORY.md\", and so on. Don't add an elipsis at the end. Keep this concise.",
             },
-            shell_command: {
+            command: {
                 type: "string",
                 description: "The shell command to run.",
             },
         },
-        ["description", "shell_command"],
+        ["description", "command"],
         {
             describe: (config) => (getRealShellEnabled(config) ? REAL_SHELL_DESCRIPTION : SANDBOX_SHELL_DESCRIPTION),
             handler: async (args, { config }) => {
-                if (!args.shell_command) throw new Error("Missing 'shell_command' argument for shell.");
+                if (!args.command) throw new Error("Missing 'command' argument for shell.");
 
                 if (getRealShellEnabled(config)) {
-                    const result = await runRealShell(String(args.shell_command));
+                    const result = await runRealShell(String(args.command));
                     realCwd = result.cwd;
                     let output = "";
                     if (result.stdout.trim()) output += `stdout:\n\`\`\`${result.stdout.trim()}\`\`\`\n`;
@@ -276,7 +276,7 @@ export const SHELL_TOOLS = {
                 }
 
                 await ensureShellTools(config);
-                const result = await wasmShell.exec(String(args.shell_command));
+                const result = await wasmShell.exec(String(args.command));
                 let output = "";
 
                 if (result.stdout) output += `stdout:\n\`\`\`${dec.decode(result.stdout).trim()}\`\`\`\n`;

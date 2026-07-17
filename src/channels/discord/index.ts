@@ -220,7 +220,7 @@ export async function formatDiscordMessage(client: Client, m: Message, imageAtta
         ...(imageAttachments || []).map((a) => a.url),
         ...(videoAttachments || []).map((a) => a.url),
     ]);
-    const otherAttachments = Array.from(m.attachments.values()).filter((a: any) => !inlinedUrls.has(a.url));
+    const otherAttachments = Array.from(m.attachments?.values() ?? []).filter((a: any) => !inlinedUrls.has(a.url));
     if (otherAttachments.length > 0) {
         message_formatted += "\n=== Attachments ===\n";
         for (const a of otherAttachments as any[]) {
@@ -455,8 +455,8 @@ async function onMessage(client: Client, msg: Message) {
                 }
             }
 
-            const lines = args.shell_command.split('\n');
-            if (call.function.name === 'shell' && args.shell_command && args.description) {
+            if (call.function.name === 'shell' && args.command && args.description) {
+                const lines = args.command.split('\n');
                 let line = lines[0];
                 if (line.length > 50) {
                     line = line.slice(0, 50) + '…';

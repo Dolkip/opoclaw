@@ -9,8 +9,10 @@ import { AgentSession, summarizeToolBatch, type ToolCall } from "../agent.ts";
 import { loadConfig } from "../config.ts";
 import { requiresToolApproval } from "../tools/index.ts";
 import { isHibernating, setHibernating, buildSystemPrompt, OP_DIR } from "./shared.ts";
+import { initFileLogging } from "../logging.ts";
 
 const LOCK_FILE = resolve(OP_DIR, ".gateway.lock");
+const LOG_FILE = resolve(OP_DIR, "logs/gateway.log");
 const CORE_HOST = "127.0.0.1";
 const CORE_PORT = 6112;
 const coreChatSessions = new Map<string, AgentSession>();
@@ -216,6 +218,7 @@ export async function handleCoreRequest(req: Request): Promise<Response> {
 }
 
 export async function startCore() {
+    initFileLogging(LOG_FILE);
     setGatewayPid(process.pid);
 
     const cleanup = () => clearGatewayPid();

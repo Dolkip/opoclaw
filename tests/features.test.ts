@@ -107,6 +107,8 @@ describe("subagent tools", () => {
 });
 
 describe("heartbeat", () => {
+  const WORKSPACE_DIR = resolve(import.meta.dir, "../workspace");
+
   async function withHeartbeatConfig(enabled: boolean, fn: () => Promise<void>) {
     const dir = await mkdtemp(join(tmpdir(), "opoclaw-hb-"));
     const path = join(dir, "config.toml");
@@ -115,11 +117,16 @@ describe("heartbeat", () => {
       : "[provider]\nactive = \"openrouter\"\n  [provider.openrouter]\n  api_key = \"k\"\n  model = \"m\"\n";
     await writeFile(path, body, "utf-8");
     process.env.OPOCLAW_CONFIG_PATH = path;
+    const heartbeatFile = join(WORKSPACE_DIR, "HEARTBEAT.md");
+    const hadHeartbeatFile = existsSync(heartbeatFile);
+    await mkdir(WORKSPACE_DIR, { recursive: true });
+    await writeFile(heartbeatFile, "Check in on things.\n", "utf-8");
     try {
       await fn();
     } finally {
       delete process.env.OPOCLAW_CONFIG_PATH;
       await rm(dir, { recursive: true, force: true });
+      if (!hadHeartbeatFile) await rm(heartbeatFile, { force: true });
     }
   }
 
